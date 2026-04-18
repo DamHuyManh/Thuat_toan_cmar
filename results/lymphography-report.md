@@ -1,0 +1,55 @@
+# Lymphography - CMAR Benchmark Report
+
+## Dataset Info
+| Property | Value |
+|---|---|
+| Description | 148 instances, 18 attrs, 4 classes |
+| Instances | 148 |
+| Attributes | 18 |
+| Classes | 4 |
+
+## Parameters
+| Parameter | Value |
+|---|---|
+| Min Support (absolute) | 2 |
+| Min Support (ratio) | 0.01 |
+| Min Confidence | 0.50 |
+| Chi-Square Threshold | 3.841 (p=0.05) |
+| Max Coverage Count | 3 |
+| Cross-Validation | 10-fold |
+
+## Results
+
+### Our CMAR vs Paper Results
+| Classifier | Accuracy |
+|---|---|
+| **Our CMAR (Java)** | **83.5%** |
+| Paper CMAR | 83.1% |
+| Paper CBA | 77.8% |
+| Paper C4.5 | 73.5% |
+
+**Difference vs Paper CMAR:** +0.4%
+
+### Per-Fold Accuracy
+| Fold | Accuracy |
+|---|---|
+| Fold 1 | 72.2% |
+| Fold 2 | 81.3% |
+| Fold 3 | 80.0% |
+| Fold 4 | 80.0% |
+| Fold 5 | 78.6% |
+| Fold 6 | 85.7% |
+| Fold 7 | 100.0% |
+| Fold 8 | 78.6% |
+| Fold 9 | 85.7% |
+| Fold 10 | 92.9% |
+| **Average** | **83.5%** |
+
+### Performance
+| Metric | Value |
+|---|---|
+| Avg Training Time | 543 ms |
+| Avg Prediction Time | 0 ms |
+| Avg Rules Mined | 65800 |
+| Avg Rules After Pruning | 147 |
+| Pruning Ratio | 99.8% |
