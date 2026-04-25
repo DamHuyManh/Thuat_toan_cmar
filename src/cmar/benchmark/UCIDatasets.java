@@ -69,6 +69,7 @@ public class UCIDatasets {
         return DataLoader.readLocalFile(csvPath); // DataLoader handles csv->legacy fallback.
     }
 
+
     public static class Dataset {
         public String name;
         public int[][] transactions;
@@ -83,11 +84,7 @@ public class UCIDatasets {
         public double paperCBAAccuracy;
         public double paperC45Accuracy;
         public String source;
-        public int optimalAntLen = 0;  // 0 = dùng default
-        public int optimalCoverage = 0; // 0 = dùng default
-        public double optimalChi = 0;  // 0 = dùng default 3.841
-        public long optimalSeed = -1;  // -1 = dùng default 42
-
+        public DataLoader.RawData rawData; // for per-fold leak-free discretization
         public Dataset(String name, int[][] transactions, int[] labels,
                        int numAttributes, int numClasses, String description,
                        double paperMinSup, double paperMinConf,
@@ -107,18 +104,6 @@ public class UCIDatasets {
             this.source = source;
         }
 
-        public Dataset withOptimal(int antLen, int coverage) {
-            this.optimalAntLen = antLen;
-            this.optimalCoverage = coverage;
-            return this;
-        }
-
-        public Dataset withOptimal(int antLen, int coverage, double chi) {
-            this.optimalAntLen = antLen;
-            this.optimalCoverage = coverage;
-            this.optimalChi = chi;
-            return this;
-        }
     }
 
     public static List<Dataset> getAllDatasets() {
@@ -180,12 +165,15 @@ public class UCIDatasets {
                 if (line.isEmpty()) continue;
                 cleaned2.add(line.replace("?", "MISS"));
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", cleaned2));
+            String annealCsv = String.join("\n", cleaned2);
+            int[][][] parsed = DataLoader.parseMDL(annealCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Anneal", parsed[0], parsed[1][0], 38, 6,
+                Dataset ds = new Dataset("Anneal", parsed[0], parsed[1][0], 38, 6,
                         parsed[0].length + " instances, 38 mixed attrs, 6 classes",
-                        0.01, 0.50, 97.3, 97.9, 94.8, "real"); // 38 attrs
+                        0.01, 0.50, 97.3, 97.9, 94.8, "real");
+                ds.rawData = DataLoader.parseRaw(annealCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -210,14 +198,17 @@ public class UCIDatasets {
                 sb.append(parts[0].trim()); // class to last
                 reordered.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", reordered));
+            String autoCsv = String.join("\n", reordered);
+            int[][][] parsed = DataLoader.parseMDL(autoCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
                 Set<Integer> classes = new HashSet<>();
                 for (int l : parsed[1][0]) classes.add(l);
-                return new Dataset("Auto", parsed[0], parsed[1][0], 25, classes.size(),
+                Dataset ds = new Dataset("Auto", parsed[0], parsed[1][0], 25, classes.size(),
                         parsed[0].length + " instances, 25 mixed attrs, " + classes.size() + " classes",
                         0.01, 0.50, 78.1, 78.3, 80.1, "real");
+                ds.rawData = DataLoader.parseRaw(autoCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -244,12 +235,15 @@ public class UCIDatasets {
                 sb.append(cls > 0 ? "1" : "0");
                 cleaned.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", cleaned));
+            String cleveCsv = String.join("\n", cleaned);
+            int[][][] parsed = DataLoader.parseMDL(cleveCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Cleve", parsed[0], parsed[1][0], 13, 2,
+                Dataset ds = new Dataset("Cleve", parsed[0], parsed[1][0], 13, 2,
                         parsed[0].length + " instances, 13 attrs, 2 classes",
                         0.01, 0.50, 82.2, 82.8, 78.2, "real");
+                ds.rawData = DataLoader.parseRaw(cleveCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -261,12 +255,15 @@ public class UCIDatasets {
         String csv = readCsvFirst("datasets/crx.csv");
         if (csv != null && csv.length() > 100) {
             // Comma-separated, last col = class (+/-), has ?
-            int[][][] parsed = DataLoader.parseMDL(csv.replace("?", "MISS"));
+            String crxCsv = csv.replace("?", "MISS");
+            int[][][] parsed = DataLoader.parseMDL(crxCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Crx", parsed[0], parsed[1][0], 15, 2,
+                Dataset ds = new Dataset("Crx", parsed[0], parsed[1][0], 15, 2,
                         parsed[0].length + " instances, 15 mixed attrs, 2 classes",
                         0.01, 0.50, 84.9, 84.7, 84.9, "real");
+                ds.rawData = DataLoader.parseRaw(crxCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -278,12 +275,14 @@ public class UCIDatasets {
         String csv = readCsvFirst("datasets/diabetes.csv");
         if (csv == null) csv = readCsvFirst("datasets/pima-indians-diabetes.csv");
         if (csv != null && csv.length() > 100) {
-            int[][][] parsed = DataLoader.parseCSV(csv, 12, null);
+            int[][][] parsed = DataLoader.parseMDL(csv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Diabetes", parsed[0], parsed[1][0], 8, 2,
+                Dataset ds = new Dataset("Diabetes", parsed[0], parsed[1][0], 8, 2,
                         parsed[0].length + " instances, 8 numeric attrs, 2 classes",
-                        0.008, 0.50, 75.8, 74.5, 74.2, "real").withOptimal(2, 1);
+                        0.008, 0.50, 75.8, 74.5, 74.2, "real");
+                ds.rawData = DataLoader.parseRaw(csv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -302,12 +301,15 @@ public class UCIDatasets {
                 if (line.isEmpty()) continue;
                 converted.add(line.replaceAll("\\s+", ","));
             }
-            int[][][] parsed = DataLoader.parseCSV(String.join("\n", converted), 8, null);
+            String germanCsv = String.join("\n", converted);
+            int[][][] parsed = DataLoader.parseMDL(germanCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("German", parsed[0], parsed[1][0], 20, 2,
+                Dataset ds = new Dataset("German", parsed[0], parsed[1][0], 20, 2,
                         parsed[0].length + " instances, 20 mixed attrs, 2 classes",
-                        0.01, 0.50, 74.9, 73.4, 72.3, "real").withOptimal(4, 5);
+                        0.01, 0.50, 74.9, 73.4, 72.3, "real");
+                ds.rawData = DataLoader.parseRaw(germanCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -335,7 +337,7 @@ public class UCIDatasets {
                 String[] parts = line.trim().split("\\s+");
                 if (parts.length < 24) continue;
                 StringBuilder sb = new StringBuilder();
-                // Use 22 attrs: skip col 2 (hospital#), col 23 (class), cols 24-27 (pathological)
+                // 22 attrs: parts[0,1,3..22] — skip hospital(2); class = surgical lesion (parts[23])
                 for (int i = 0; i < Math.min(parts.length, 23); i++) {
                     if (i == 2) continue; // skip hospital number
                     String val = parts[i].equals("?") ? "MISS" : parts[i];
@@ -346,12 +348,15 @@ public class UCIDatasets {
                 sb.append(cls);
                 cleaned.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", cleaned));
+            String horseCsv = String.join("\n", cleaned);
+            int[][][] parsed = DataLoader.parseMDL(horseCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Horse", parsed[0], parsed[1][0], 22, 2,
+                Dataset ds = new Dataset("Horse", parsed[0], parsed[1][0], 22, 2,
                         parsed[0].length + " instances, 22 mixed attrs, 2 classes",
                         0.01, 0.50, 82.6, 82.1, 82.6, "real");
+                ds.rawData = DataLoader.parseRaw(horseCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -380,12 +385,15 @@ public class UCIDatasets {
                 sb.append(cls);
                 reordered.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", reordered));
+            String hypoCsv = String.join("\n", reordered);
+            int[][][] parsed = DataLoader.parseMDL(hypoCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Hypo", parsed[0], parsed[1][0], 25, 2,
+                Dataset ds = new Dataset("Hypo", parsed[0], parsed[1][0], 25, 2,
                         parsed[0].length + " instances, 25 mixed attrs, 2 classes",
-                        0.01, 0.50, 98.4, 98.9, 99.2, "real"); // 25 attrs
+                        0.01, 0.50, 98.4, 98.9, 99.2, "real");
+                ds.rawData = DataLoader.parseRaw(hypoCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -396,12 +404,14 @@ public class UCIDatasets {
         System.out.print("  Loading Iono... ");
         String csv = readCsvFirst("datasets/ionosphere.csv");
         if (csv != null && csv.length() > 100) {
-            int[][][] parsed = DataLoader.parseCSV(csv, 5, null);
+            int[][][] parsed = DataLoader.parseMDL(csv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Iono", parsed[0], parsed[1][0], 34, 2,
+                Dataset ds = new Dataset("Iono", parsed[0], parsed[1][0], 34, 2,
                         parsed[0].length + " instances, 34 numeric attrs, 2 classes",
-                        0.032, 0.50, 91.5, 92.3, 90.0, "real").withOptimal(4, 5);
+                        0.032, 0.50, 91.5, 92.3, 90.0, "real");
+                ds.rawData = DataLoader.parseRaw(csv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -420,12 +430,15 @@ public class UCIDatasets {
                 if (line.isEmpty() || line.startsWith("@")) continue;
                 cleaned.add(line);
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", cleaned));
+            String laborCsv = String.join("\n", cleaned);
+            int[][][] parsed = DataLoader.parseMDL(laborCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Labor", parsed[0], parsed[1][0], 16, 2,
+                Dataset ds = new Dataset("Labor", parsed[0], parsed[1][0], 16, 2,
                         parsed[0].length + " instances, 16 mixed attrs, 2 classes",
                         0.01, 0.50, 89.7, 86.3, 79.3, "real");
+                ds.rawData = DataLoader.parseRaw(laborCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -440,9 +453,10 @@ public class UCIDatasets {
             int[][][] parsed = DataLoader.parseCSV(csv, 2, null);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Led7", parsed[0], parsed[1][0], 7, 10,
+                Dataset ds = new Dataset("Led7", parsed[0], parsed[1][0], 7, 10,
                         parsed[0].length + " instances, 7 binary attrs, 10 classes",
                         0.01, 0.50, 72.5, 71.9, 73.5, "real");
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -479,12 +493,15 @@ public class UCIDatasets {
                 sb.append(cls.contains("sick") ? "1" : "0");
                 cleaned.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", cleaned));
+            String sickCsv = String.join("\n", cleaned);
+            int[][][] parsed = DataLoader.parseMDL(sickCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Sick", parsed[0], parsed[1][0], 29, 2,
+                Dataset ds = new Dataset("Sick", parsed[0], parsed[1][0], 29, 2,
                         parsed[0].length + " instances, 29 mixed attrs, 2 classes",
-                        0.01, 0.50, 97.5, 97.0, 98.5, "real"); // 29 attrs
+                        0.005, 0.50, 97.5, 97.0, 98.5, "real");
+                ds.rawData = DataLoader.parseRaw(sickCsv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -496,12 +513,14 @@ public class UCIDatasets {
         String csv = readCsvFirst("datasets/sonar.csv");
         if (csv != null && csv.length() > 100) {
             // Comma-separated, last col = class (R/M), 60 numeric attrs
-            int[][][] parsed = DataLoader.parseCSV(csv, 3, null);
+            int[][][] parsed = DataLoader.parseMDL(csv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Sonar", parsed[0], parsed[1][0], 60, 2,
+                Dataset ds = new Dataset("Sonar", parsed[0], parsed[1][0], 60, 2,
                         parsed[0].length + " instances, 60 numeric attrs, 2 classes",
-                        0.08, 0.50, 79.4, 77.5, 70.2, "real").withOptimal(3, 3);
+                        0.08, 0.50, 79.4, 77.5, 70.2, "real");
+                ds.rawData = DataLoader.parseRaw(csv);
+                return ds;
             }
         }
         System.out.println("FAILED"); return null;
@@ -516,12 +535,14 @@ public class UCIDatasets {
             csv = DataLoader.fetchURL(url);
         }
         if (csv != null && csv.length() > 100) {
-            int[][][] parsed = DataLoader.parseCSV(csv, 3, null);
+            int[][][] parsed = DataLoader.parseMDL(csv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Iris", parsed[0], parsed[1][0], 4, 3,
+                Dataset ds = new Dataset("Iris", parsed[0], parsed[1][0], 4, 3,
                         parsed[0].length + " instances, 4 numeric attrs, 3 classes",
-                        0.01, 0.50, 94.0, 94.7, 95.3, "real").withOptimal(2, 2);
+                        0.01, 0.50, 94.0, 94.7, 95.3, "real");
+                ds.rawData = DataLoader.parseRaw(csv);
+                return ds;
             }
         }
         System.out.println("synthetic");
@@ -549,12 +570,15 @@ public class UCIDatasets {
                 sb.append(parts[0].trim());
                 reordered.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseCSV(String.join("\n", reordered), 4, null);
+            String wineCsv = String.join("\n", reordered);
+            int[][][] parsed = DataLoader.parseMDL(wineCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Wine", parsed[0], parsed[1][0], 13, 3,
+                Dataset ds = new Dataset("Wine", parsed[0], parsed[1][0], 13, 3,
                         parsed[0].length + " instances, 13 numeric attrs, 3 classes",
-                        0.01, 0.50, 95.0, 95.0, 92.7, "real").withOptimal(2, 2);
+                        0.01, 0.50, 95.0, 95.0, 92.7, "real");
+                ds.rawData = DataLoader.parseRaw(wineCsv);
+                return ds;
             }
         }
         System.out.println("synthetic");
@@ -582,12 +606,15 @@ public class UCIDatasets {
                 sb.append(parts[10].trim());
                 cleaned.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", cleaned));
+            String bcCsv = String.join("\n", cleaned);
+            int[][][] parsed = DataLoader.parseMDL(bcCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Breast-Cancer", parsed[0], parsed[1][0], 9, 2,
+                Dataset ds = new Dataset("Breast-Cancer", parsed[0], parsed[1][0], 9, 2,
                         parsed[0].length + " instances, 9 integer attrs, 2 classes",
                         0.01, 0.50, 96.4, 96.3, 95.0, "real");
+                ds.rawData = DataLoader.parseRaw(bcCsv);
+                return ds;
             }
         }
         System.out.println("synthetic");
@@ -614,14 +641,13 @@ public class UCIDatasets {
                 sb.append(parts[17].trim());
                 cleaned.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseCSV(String.join("\n", cleaned), 2, null);
+            String zooCsv = String.join("\n", cleaned);
+            int[][][] parsed = DataLoader.parseCSV(zooCsv, 2, null);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
                 Dataset ds = new Dataset("Zoo", parsed[0], parsed[1][0], 16, 7,
                         parsed[0].length + " instances, 16 boolean attrs, 7 classes",
                         0.034, 0.50, 97.1, 96.8, 92.2, "real");
-                ds.withOptimal(4, 3);
-                ds.optimalSeed = 24;
                 return ds;
             }
         }
@@ -651,14 +677,17 @@ public class UCIDatasets {
                 sb.append(parts[10].trim());
                 cleaned.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", cleaned));
+            String glassCsv = String.join("\n", cleaned);
+            int[][][] parsed = DataLoader.parseMDL(glassCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
                 Set<Integer> classes = new HashSet<>();
                 for (int l : parsed[1][0]) classes.add(l);
-                return new Dataset("Glass", parsed[0], parsed[1][0], 9, classes.size(),
+                Dataset ds = new Dataset("Glass", parsed[0], parsed[1][0], 9, classes.size(),
                         parsed[0].length + " instances, 9 numeric attrs, " + classes.size() + " classes",
                         0.01, 0.50, 70.1, 73.9, 68.7, "real");
+                ds.rawData = DataLoader.parseRaw(glassCsv);
+                return ds;
             }
         }
         System.out.println("synthetic");
@@ -677,9 +706,10 @@ public class UCIDatasets {
             int[][][] parsed = DataLoader.parseCSV(csv, 2, null);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Tic-Tac-Toe", parsed[0], parsed[1][0], 9, 2,
+                Dataset ds = new Dataset("Tic-Tac-Toe", parsed[0], parsed[1][0], 9, 2,
                         parsed[0].length + " instances, 9 categorical attrs, 2 classes",
                         0.01, 0.50, 99.2, 99.6, 99.4, "real");
+                return ds;
             }
         }
         System.out.println("synthetic");
@@ -707,14 +737,16 @@ public class UCIDatasets {
                 sb.append(parts[0].trim());
                 reordered.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseCSV(String.join("\n", reordered), 6, null);
+            String lymphCsv = String.join("\n", reordered);
+            int[][][] parsed = DataLoader.parseCSV(lymphCsv, 6, null);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
                 Set<Integer> classes = new HashSet<>();
                 for (int l : parsed[1][0]) classes.add(l);
-                return new Dataset("Lymphography", parsed[0], parsed[1][0], 18, classes.size(),
+                Dataset ds = new Dataset("Lymphography", parsed[0], parsed[1][0], 18, classes.size(),
                         parsed[0].length + " instances, 18 attrs, " + classes.size() + " classes",
                         0.01, 0.50, 83.1, 77.8, 73.5, "real");
+                return ds;
             }
         }
         System.out.println("synthetic");
@@ -739,12 +771,15 @@ public class UCIDatasets {
                 if (line.isEmpty()) continue;
                 converted.add(line.replaceAll("\\s+", ","));
             }
-            int[][][] parsed = DataLoader.parseCSV(String.join("\n", converted), 2, null);
+            String heartCsv = String.join("\n", converted);
+            int[][][] parsed = DataLoader.parseMDL(heartCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Heart", parsed[0], parsed[1][0], 13, 2,
+                Dataset ds = new Dataset("Heart", parsed[0], parsed[1][0], 13, 2,
                         parsed[0].length + " instances, 13 attrs, 2 classes",
-                        0.01, 0.50, 82.2, 81.9, 80.8, "real").withOptimal(4, 3);
+                        0.01, 0.50, 82.2, 81.9, 80.8, "real");
+                ds.rawData = DataLoader.parseRaw(heartCsv);
+                return ds;
             }
         }
         System.out.println("synthetic");
@@ -760,12 +795,14 @@ public class UCIDatasets {
             csv = DataLoader.fetchURL("https://raw.githubusercontent.com/jbrownlee/Datasets/master/pima-indians-diabetes.data.csv");
         }
         if (csv != null && csv.length() > 100) {
-            int[][][] parsed = DataLoader.parseCSV(csv, 9, null);
+            int[][][] parsed = DataLoader.parseMDL(csv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Pima", parsed[0], parsed[1][0], 8, 2,
+                Dataset ds = new Dataset("Pima", parsed[0], parsed[1][0], 8, 2,
                         parsed[0].length + " instances, 8 numeric attrs, 2 classes",
-                        0.008, 0.50, 75.1, 72.9, 75.5, "real").withOptimal(2, 4);
+                        0.008, 0.50, 75.1, 72.9, 75.5, "real");
+                ds.rawData = DataLoader.parseRaw(csv);
+                return ds;
             }
         }
         System.out.println("FAILED to load");
@@ -785,12 +822,15 @@ public class UCIDatasets {
                 if (line.isEmpty()) continue;
                 converted.add(line.replaceAll("\\s+", ","));
             }
-            int[][][] parsed = DataLoader.parseCSV(String.join("\n", converted), 9, null);
+            String australianCsv = String.join("\n", converted);
+            int[][][] parsed = DataLoader.parseMDL(australianCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Australian", parsed[0], parsed[1][0], 14, 2,
+                Dataset ds = new Dataset("Australian", parsed[0], parsed[1][0], 14, 2,
                         parsed[0].length + " instances, 14 mixed attrs, 2 classes",
                         0.01, 0.50, 86.1, 84.9, 84.7, "real");
+                ds.rawData = DataLoader.parseRaw(australianCsv);
+                return ds;
             }
         }
         System.out.println("FAILED to load");
@@ -816,12 +856,15 @@ public class UCIDatasets {
                 sb.append(parts[0].trim()); // class to last
                 reordered.add(sb.toString());
             }
-            int[][][] parsed = DataLoader.parseMDL(String.join("\n", reordered));
+            String hepatitisCsv = String.join("\n", reordered);
+            int[][][] parsed = DataLoader.parseMDL(hepatitisCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Hepatitis", parsed[0], parsed[1][0], 19, 2,
+                Dataset ds = new Dataset("Hepatitis", parsed[0], parsed[1][0], 19, 2,
                         parsed[0].length + " instances, 19 mixed attrs, 2 classes",
                         0.01, 0.50, 80.5, 81.8, 80.6, "real");
+                ds.rawData = DataLoader.parseRaw(hepatitisCsv);
+                return ds;
             }
         }
         System.out.println("FAILED to load");
@@ -841,12 +884,15 @@ public class UCIDatasets {
                 if (line.isEmpty()) continue;
                 converted.add(line.replaceAll("\\s+", ","));
             }
-            int[][][] parsed = DataLoader.parseCSV(String.join("\n", converted), 7, null);
+            String vehicleCsv = String.join("\n", converted);
+            int[][][] parsed = DataLoader.parseMDL(vehicleCsv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Vehicle", parsed[0], parsed[1][0], 18, 4,
+                Dataset ds = new Dataset("Vehicle", parsed[0], parsed[1][0], 18, 4,
                         parsed[0].length + " instances, 18 numeric attrs, 4 classes",
-                        0.015, 0.50, 68.8, 68.7, 72.6, "real").withOptimal(4, 4);
+                        0.015, 0.50, 68.8, 68.7, 72.6, "real");
+                ds.rawData = DataLoader.parseRaw(vehicleCsv);
+                return ds;
             }
         }
         System.out.println("FAILED to load");
@@ -859,12 +905,14 @@ public class UCIDatasets {
         String csv = readCsvFirst("datasets/waveform.csv");
         if (csv != null && csv.length() > 100) {
             // Comma-separated: 21 numeric attrs + class (0/1/2)
-            int[][][] parsed = DataLoader.parseCSV(csv, 4, null);
+            int[][][] parsed = DataLoader.parseMDL(csv);
             if (parsed != null) {
                 System.out.println("real data (" + parsed[0].length + " rows)");
-                return new Dataset("Waveform", parsed[0], parsed[1][0], 21, 3,
+                Dataset ds = new Dataset("Waveform", parsed[0], parsed[1][0], 21, 3,
                         parsed[0].length + " instances, 21 numeric attrs, 3 classes",
                         0.01, 0.50, 83.2, 80.0, 78.1, "real");
+                ds.rawData = DataLoader.parseRaw(csv);
+                return ds;
             }
         }
         System.out.println("FAILED to load");

@@ -1,6 +1,8 @@
 package cmar.benchmark;
 
 import cmar.CMARClassifier;
+import cmar.util.PhaseTimer;
+import cmar.util.MemorySampler;
 import java.io.*;
 import java.util.*;
 
@@ -15,7 +17,18 @@ public class BenchmarkRunner {
     static final int TUNE_FOLDS = 2; // fast tuning with 2 folds
 
     public static void main(String[] args) throws IOException {
-        System.out.println("=== CMAR Benchmark Suite ===\n");
+        // Phase 05: parse --mode=baseline|improved (default=improved)
+        String mode = "improved";
+        for (String arg : args) {
+            if (arg.startsWith("--mode=")) mode = arg.substring(7).toLowerCase();
+        }
+        if (mode.equals("baseline")) {
+            cmar.util.OptimizationProfile.setMode(cmar.util.OptimizationProfile.Mode.BASELINE);
+            System.out.println("=== CMAR Benchmark — BASELINE (original algorithm) ===\n");
+        } else {
+            cmar.util.OptimizationProfile.setMode(cmar.util.OptimizationProfile.Mode.IMPROVED);
+            System.out.println("=== CMAR Benchmark — IMPROVED (inverted index + BitSet AND) ===\n");
+        }
 
         new File(RESULTS_DIR).mkdirs();
 
@@ -38,7 +51,60 @@ public class BenchmarkRunner {
 
         // Write summary report
         writeSummaryReport(results);
+        writeProfilingCsv(results);
+        writeProfilingReport(results);
         System.out.println("\nAll reports saved to " + RESULTS_DIR + "/");
+    }
+
+    /** Phase 01 — emit CSV profiling (time per phase + peak memory). */
+    static void writeProfilingCsv(List<DatasetResult> results) throws IOException {
+        String f = RESULTS_DIR + "/profiling-metrics.csv";
+        try (FileWriter fw = new FileWriter(f)) {
+            fw.write("dataset,instances,attrs,classes,accuracy,trainMs,mineMs,pruneMs,chiSqMs,g2sMs,covMs,bmapMs,indexMs,predictMs,peakMemMB,rulesMined,rulesPruned\n");
+            for (DatasetResult r : results) {
+                fw.write(String.format(Locale.US,
+                        "%s,%d,%d,%d,%.4f,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d,%d,%d%n",
+                        r.dataset.name, r.dataset.numInstances, r.dataset.numAttributes,
+                        r.dataset.numClasses, r.accuracy,
+                        r.avgTrainTimeMs, r.avgMineMs, r.avgPruneMs,
+                        r.avgChiSqMs, r.avgG2SMs, r.avgCovMs, r.avgBmapMs,
+                        r.avgIndexMs, r.avgPredictTimeMs,
+                        r.peakMemMB, r.avgRulesMined, r.avgRulesPruned));
+            }
+        }
+    }
+
+    /** Phase 01 — emit markdown profiling report. */
+    static void writeProfilingReport(List<DatasetResult> results) throws IOException {
+        String f = RESULTS_DIR + "/profiling-metrics.md";
+        StringBuilder sb = new StringBuilder();
+        sb.append("# CMAR Profiling Metrics — Baseline\n\n");
+        sb.append("**Date:** 2026-04-23\n");
+        sb.append("**Source:** Phase 01 Baseline Measurement Infrastructure\n\n");
+        sb.append("## Per-phase timing + peak memory\n\n");
+        sb.append("| Dataset | N | Train (ms) | Mine (ms) | Prune (ms) | ChiSq (ms) | G2S (ms) | Cov (ms) | Bmap (ms) | Index (ms) | Predict (ms) | Peak MB | Rules (raw→pruned) |\n");
+        sb.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+        for (DatasetResult r : results) {
+            sb.append(String.format(Locale.US,
+                    "| %s | %d | %d | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %.1f | %d | %d | %d→%d |%n",
+                    r.dataset.name, r.dataset.numInstances,
+                    r.avgTrainTimeMs, r.avgMineMs, r.avgPruneMs,
+                    r.avgChiSqMs, r.avgG2SMs, r.avgCovMs, r.avgBmapMs,
+                    r.avgIndexMs, r.avgPredictTimeMs,
+                    r.peakMemMB, r.avgRulesMined, r.avgRulesPruned));
+        }
+        // Aggregates
+        double totMine=0, totPrune=0, totTrain=0; long totMem=0;
+        for (DatasetResult r : results) {
+            totMine += r.avgMineMs; totPrune += r.avgPruneMs;
+            totTrain += r.avgTrainTimeMs; totMem += r.peakMemMB;
+        }
+        sb.append(String.format(Locale.US,
+                "\n## Aggregate\n\n- Total train (sum): %.0f ms\n- Total mining: %.0f ms (%.0f%% of train)\n- Total pruning: %.0f ms (%.0f%% of train)\n- Average peak mem: %d MB\n",
+                totTrain, totMine, 100.0*totMine/Math.max(1,totTrain),
+                totPrune, 100.0*totPrune/Math.max(1,totTrain),
+                totMem/Math.max(1,results.size())));
+        try (FileWriter fw = new FileWriter(f)) { fw.write(sb.toString()); }
     }
 
     /**
@@ -46,11 +112,11 @@ public class BenchmarkRunner {
      * Uses 10-fold for larger datasets, 5-fold for small ones (<150 instances).
      */
     static DatasetResult runBenchmark(UCIDatasets.Dataset ds) {
-        int folds = 10;
         int n = ds.numInstances;
+        int folds = 10;
 
         // Stratified k-fold: group indices by class, then distribute evenly
-        long seed = ds.optimalSeed >= 0 ? ds.optimalSeed : 42;
+        long seed = 42;
         Random rng = new Random(seed);
         Map<Integer, List<Integer>> byClass = new HashMap<>();
         for (int i = 0; i < n; i++)
@@ -94,6 +160,14 @@ public class BenchmarkRunner {
         result.avgRulesPruned = best.avgRulesPruned;
         result.minSupport = best.minSupport;
         result.minConfidence = best.minConfidence;
+        result.avgMineMs = best.avgMineMs;
+        result.avgPruneMs = best.avgPruneMs;
+        result.avgChiSqMs = best.avgChiSqMs;
+        result.avgG2SMs = best.avgG2SMs;
+        result.avgCovMs = best.avgCovMs;
+        result.avgBmapMs = best.avgBmapMs;
+        result.avgIndexMs = best.avgIndexMs;
+        result.peakMemMB = best.peakMemMB;
         return result;
     }
 
@@ -105,6 +179,10 @@ public class BenchmarkRunner {
         int totalRulesMined = 0;
         int totalRulesPruned = 0;
         double[] foldAccuracies = new double[folds];
+        // Phase 01 profiling accumulators
+        double result_mineMs = 0, result_pruneMs = 0, result_chiSqMs = 0;
+        double result_g2sMs = 0, result_covMs = 0, result_bmapMs = 0, result_indexMs = 0;
+        long result_peakMB = 0;
 
         int actualFolds = Math.max(1, Math.min(folds, evalFoldCount));
         for (int f = 0; f < actualFolds; f++) {
@@ -119,24 +197,43 @@ public class BenchmarkRunner {
             int trainSize = trainIdx.size();
             int testSize = testIdx.size();
 
-            int[][] trainData = new int[trainSize][];
-            int[] trainLabels = new int[trainSize];
-            int[][] testData = new int[testSize][];
-            int[] testLabels = new int[testSize];
+            int[][] trainData;
+            int[] trainLabels;
+            int[][] testData;
+            int[] testLabels;
 
-            for (int i = 0; i < trainSize; i++) {
-                trainData[i] = ds.transactions[trainIdx.get(i)];
-                trainLabels[i] = ds.labels[trainIdx.get(i)];
-            }
-            for (int i = 0; i < testSize; i++) {
-                testData[i] = ds.transactions[testIdx.get(i)];
-                testLabels[i] = ds.labels[testIdx.get(i)];
+            if (ds.rawData != null) {
+                // Paper-faithful: MDL cut points học CHỈ từ train fold (không leak test)
+                int[] trainIdxArr = trainIdx.stream().mapToInt(Integer::intValue).toArray();
+                int[] testIdxArr  = testIdx.stream().mapToInt(Integer::intValue).toArray();
+                DataLoader.FoldData fold = DataLoader.encodeFold(ds.rawData, trainIdxArr, testIdxArr);
+                trainData   = fold.trainTx;
+                trainLabels = fold.trainLabels;
+                testData    = fold.testTx;
+                testLabels  = fold.testLabels;
+            } else {
+                trainData   = new int[trainSize][];
+                trainLabels = new int[trainSize];
+                testData    = new int[testSize][];
+                testLabels  = new int[testSize];
+                for (int i = 0; i < trainSize; i++) {
+                    trainData[i]   = ds.transactions[trainIdx.get(i)];
+                    trainLabels[i] = ds.labels[trainIdx.get(i)];
+                }
+                for (int i = 0; i < testSize; i++) {
+                    testData[i]   = ds.transactions[testIdx.get(i)];
+                    testLabels[i] = ds.labels[testIdx.get(i)];
+                }
             }
 
             // Train - cap rules for high-dimensional datasets
             CMARClassifier cmar = new CMARClassifier(
                     cfg.minSupport, cfg.minConfidence, cfg.chiThreshold,
                     cfg.maxCoverageCount, cfg.maxRules, cfg.maxAntecedentLen);
+
+            PhaseTimer.reset();
+            MemorySampler mem = new MemorySampler(20);
+            mem.start();
             long t0 = System.nanoTime();
             cmar.fit(trainData, trainLabels);
             long trainTime = (System.nanoTime() - t0) / 1_000_000;
@@ -145,6 +242,17 @@ public class BenchmarkRunner {
             long t1 = System.nanoTime();
             double acc = cmar.score(testData, testLabels);
             long predictTime = (System.nanoTime() - t1) / 1_000_000;
+            mem.stop();
+
+            // Aggregate phase timings
+            result_mineMs   += PhaseTimer.getMillis("mining");
+            result_pruneMs  += PhaseTimer.getMillis("pruning");
+            result_chiSqMs  += PhaseTimer.getMillis("prune_chisquare");
+            result_g2sMs    += PhaseTimer.getMillis("prune_g2s");
+            result_covMs    += PhaseTimer.getMillis("prune_coverage");
+            result_bmapMs   += PhaseTimer.getMillis("prune_bitmap");
+            result_indexMs  += PhaseTimer.getMillis("indexing");
+            result_peakMB    = Math.max(result_peakMB, mem.deltaMB());
 
             foldAccuracies[f] = acc;
             totalAccuracy += acc;
@@ -163,6 +271,14 @@ public class BenchmarkRunner {
         result.avgRulesPruned = totalRulesPruned / actualFolds;
         result.minSupport = cfg.minSupport;
         result.minConfidence = cfg.minConfidence;
+        result.avgMineMs     = result_mineMs / actualFolds;
+        result.avgPruneMs    = result_pruneMs / actualFolds;
+        result.avgChiSqMs    = result_chiSqMs / actualFolds;
+        result.avgG2SMs      = result_g2sMs / actualFolds;
+        result.avgCovMs      = result_covMs / actualFolds;
+        result.avgBmapMs     = result_bmapMs / actualFolds;
+        result.avgIndexMs    = result_indexMs / actualFolds;
+        result.peakMemMB     = result_peakMB;
         return result;
     }
 
@@ -391,6 +507,9 @@ public class BenchmarkRunner {
         int avgRulesPruned;
         int minSupport;
         double minConfidence;
+        // Phase 01 profiling
+        double avgMineMs, avgPruneMs, avgChiSqMs, avgG2SMs, avgCovMs, avgBmapMs, avgIndexMs;
+        long peakMemMB;
     }
 
     static class EvalResult {
@@ -402,6 +521,9 @@ public class BenchmarkRunner {
         int avgRulesPruned;
         int minSupport;
         double minConfidence;
+        // Phase 01 profiling
+        double avgMineMs, avgPruneMs, avgChiSqMs, avgG2SMs, avgCovMs, avgBmapMs, avgIndexMs;
+        long peakMemMB;
     }
 
     static class ParamConfig {
@@ -425,14 +547,15 @@ public class BenchmarkRunner {
         }
 
         static ParamConfig base(UCIDatasets.Dataset ds, int trainN) {
-            // Paper defaults: minSup=1%, minConf=50%, chi²=3.841, delta=4
-            // Mỗi dataset có thể override qua withOptimal() để match paper tốt hơn
+            // PAPER SETUP: dùng minSup/minConf theo paper per-dataset (Table 3),
+            // giữ chi²=3.841 (p=0.05), delta(coverage)=4, maxAntLen=4 cố định.
             double minSupRatio = ds.paperMinSupport;
+            double minConf = ds.paperMinConfidence;
             int minSup = Math.max(2, (int)(minSupRatio * trainN));
-            double chi = ds.optimalChi > 0 ? ds.optimalChi : 3.841;
-            int coverage = ds.optimalCoverage > 0 ? ds.optimalCoverage : 4;
-            int antLen = ds.optimalAntLen > 0 ? ds.optimalAntLen : 4;
-            return new ParamConfig(minSupRatio, minSup, ds.paperMinConfidence, chi, coverage, 80000, antLen);
+            double chi = 3.841;
+            int coverage = 4; // delta=4 cho accuracy tốt hơn
+            int antLen = 4;
+            return new ParamConfig(minSupRatio, minSup, minConf, chi, coverage, 80000, antLen);
         }
 
         ParamConfig with(double minSupportRatio, double minConfidence,

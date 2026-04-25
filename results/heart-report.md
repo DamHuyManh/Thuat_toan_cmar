@@ -23,33 +23,33 @@
 ### Our CMAR vs Paper Results
 | Classifier | Accuracy |
 |---|---|
-| **Our CMAR (Java)** | **82.2%** |
+| **Our CMAR (Java)** | **80.7%** |
 | Paper CMAR | 82.2% |
 | Paper CBA | 81.9% |
 | Paper C4.5 | 80.8% |
 
-**Difference vs Paper CMAR:** +0.0%
+**Difference vs Paper CMAR:** -1.5%
 
 ### Per-Fold Accuracy
 | Fold | Accuracy |
 |---|---|
-| Fold 1 | 77.8% |
-| Fold 2 | 85.2% |
-| Fold 3 | 81.5% |
+| Fold 1 | 66.7% |
+| Fold 2 | 88.9% |
+| Fold 3 | 77.8% |
 | Fold 4 | 81.5% |
-| Fold 5 | 88.9% |
-| Fold 6 | 74.1% |
-| Fold 7 | 77.8% |
-| Fold 8 | 81.5% |
-| Fold 9 | 92.6% |
+| Fold 5 | 85.2% |
+| Fold 6 | 70.4% |
+| Fold 7 | 81.5% |
+| Fold 8 | 77.8% |
+| Fold 9 | 96.3% |
 | Fold 10 | 81.5% |
-| **Average** | **82.2%** |
+| **Average** | **80.7%** |
 
 ### Performance
 | Metric | Value |
 |---|---|
-| Avg Training Time | 296 ms |
+| Avg Training Time | 23 ms |
 | Avg Prediction Time | 0 ms |
-| Avg Rules Mined | 16059 |
-| Avg Rules After Pruning | 200 |
-| Pruning Ratio | 98.8% |
+| Avg Rules Mined | 15134 |
+| Avg Rules After Pruning | 250 |
+| Pruning Ratio | 98.3% |

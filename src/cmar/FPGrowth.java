@@ -33,19 +33,7 @@ public class FPGrowth {
     public List<Rule> mineRules(int[][] transactions, int[] labels) {
         int N = transactions.length;
 
-        // Build bitmaps for fast per-class support counting
-        int maxItem = 0;
-        for (int[] txn : transactions)
-            for (int item : txn) maxItem = Math.max(maxItem, item);
-
-        int words = (maxItem >> 6) + 1;
-        long[][] bitmaps = new long[N][words];
-        for (int i = 0; i < N; i++)
-            for (int item : transactions[i])
-                bitmaps[i][item >> 6] |= (1L << (item & 63));
-
         // Step 1: Mine frequent itemsets via FP-Growth
-        // IMPORTANT: Use minSupport consistently for main tree AND all conditional trees
         FPTree tree = FPTree.build(transactions, minSupport);
         if (tree.isEmpty()) return Collections.emptyList();
 
@@ -53,37 +41,53 @@ public class FPGrowth {
         miningStartTime = System.currentTimeMillis();
         mineItemsets(tree, new int[0], frequentItemsets);
 
-        // Step 2: Generate class association rules
-        // Per-class relative minSupport: rare classes use lower threshold
-        Map<Integer, Integer> classTotals = new HashMap<>();
-        for (int label : labels) classTotals.merge(label, 1, Integer::sum);
+        if (cmar.util.OptimizationProfile.isBaseline()) {
+            return generateRulesBaseline(frequentItemsets, transactions, labels, N);
+        }
 
+        // Phase 03 OPTIMIZATION: Build inverted index for fast itemset support counting.
+        // itemIndex[item] = BitSet of txns containing item. Per-class masks too.
+        Map<Integer, BitSet> itemIndex = new HashMap<>();
+        for (int i = 0; i < N; i++) {
+            for (int item : transactions[i]) {
+                itemIndex.computeIfAbsent(item, k -> new BitSet(N)).set(i);
+            }
+        }
+        Map<Integer, BitSet> classMasks = new HashMap<>();
+        for (int i = 0; i < N; i++) {
+            classMasks.computeIfAbsent(labels[i], k -> new BitSet(N)).set(i);
+        }
+
+        // Step 2: Generate class association rules via BitSet AND
         List<Rule> rules = new ArrayList<>();
         Map<Integer, Integer> ruleCountPerClass = new HashMap<>();
 
         for (int[] itemset : frequentItemsets) {
             if (itemset.length == 0) continue;
 
-            // Count per-class support by scanning bitmaps
-            Map<Integer, Integer> classSupport = new HashMap<>();
-            int totalMatches = 0;
-
-            for (int i = 0; i < N; i++) {
-                if (matchesBitmap(itemset, bitmaps[i], words)) {
-                    totalMatches++;
-                    classSupport.merge(labels[i], 1, Integer::sum);
-                }
+            // itemset support = AND of item BitSets — O(k * N/64)
+            BitSet match = null;
+            boolean ok = true;
+            for (int item : itemset) {
+                BitSet ib = itemIndex.get(item);
+                if (ib == null) { ok = false; break; }
+                if (match == null) match = (BitSet) ib.clone();
+                else match.and(ib);
+                if (match.isEmpty()) { ok = false; break; }
             }
-
+            if (!ok || match == null) continue;
+            int totalMatches = match.cardinality();
             if (totalMatches == 0) continue;
 
-            // Create rule for each class with sufficient support and confidence
-            for (Map.Entry<Integer, Integer> entry : classSupport.entrySet()) {
-                int classLabel = entry.getKey();
-                int clsSup = entry.getValue();
+            // Per-class support = |match AND classMask|
+            for (Map.Entry<Integer, BitSet> e : classMasks.entrySet()) {
+                int classLabel = e.getKey();
+                BitSet inter = (BitSet) match.clone();
+                inter.and(e.getValue());
+                int clsSup = inter.cardinality();
+                if (clsSup == 0) continue;
                 double conf = (double) clsSup / totalMatches;
 
-                // Keep support threshold consistent with paper-style setup.
                 if (clsSup >= minSupport && conf >= minConfidence) {
                     int count = ruleCountPerClass.getOrDefault(classLabel, 0);
                     if (maxRulesPerClass > 0 && count >= maxRulesPerClass) continue;
@@ -102,6 +106,52 @@ public class FPGrowth {
     /**
      * Mine all frequent itemsets from FP-tree.
      */
+    /** BASELINE path: generate rules via per-itemset linear bitmap scan (original CMAR). */
+    private List<Rule> generateRulesBaseline(List<int[]> frequentItemsets,
+                                              int[][] transactions, int[] labels, int N) {
+        int maxItem = 0;
+        for (int[] txn : transactions)
+            for (int item : txn) maxItem = Math.max(maxItem, item);
+        int words = (maxItem >> 6) + 1;
+        long[][] bitmaps = new long[N][words];
+        for (int i = 0; i < N; i++)
+            for (int item : transactions[i])
+                bitmaps[i][item >> 6] |= (1L << (item & 63));
+
+        List<Rule> rules = new ArrayList<>();
+        Map<Integer, Integer> ruleCountPerClass = new HashMap<>();
+        for (int[] itemset : frequentItemsets) {
+            if (itemset.length == 0) continue;
+            Map<Integer, Integer> classSupport = new HashMap<>();
+            int totalMatches = 0;
+            for (int i = 0; i < N; i++) {
+                boolean ok = true;
+                for (int item : itemset) {
+                    int idx = item >> 6;
+                    if (idx >= words || (bitmaps[i][idx] & (1L << (item & 63))) == 0) { ok = false; break; }
+                }
+                if (ok) {
+                    totalMatches++;
+                    classSupport.merge(labels[i], 1, Integer::sum);
+                }
+            }
+            if (totalMatches == 0) continue;
+            for (Map.Entry<Integer, Integer> e : classSupport.entrySet()) {
+                int classLabel = e.getKey();
+                int clsSup = e.getValue();
+                double conf = (double) clsSup / totalMatches;
+                if (clsSup >= minSupport && conf >= minConfidence) {
+                    int count = ruleCountPerClass.getOrDefault(classLabel, 0);
+                    if (maxRulesPerClass > 0 && count >= maxRulesPerClass) continue;
+                    rules.add(new Rule(itemset.clone(), classLabel, clsSup, conf));
+                    ruleCountPerClass.merge(classLabel, 1, Integer::sum);
+                }
+            }
+        }
+        Collections.sort(rules);
+        return rules;
+    }
+
     private void mineItemsets(FPTree tree, int[] prefix, List<int[]> itemsets) {
         if (tree.isEmpty()) return;
         if (prefix.length >= maxAntecedentLength) return;
@@ -180,12 +230,4 @@ public class FPGrowth {
         }
     }
 
-    private static boolean matchesBitmap(int[] itemset, long[] bitmap, int words) {
-        for (int item : itemset) {
-            int idx = item >> 6;
-            if (idx >= words || (bitmap[idx] & (1L << (item & 63))) == 0)
-                return false;
-        }
-        return true;
-    }
 }

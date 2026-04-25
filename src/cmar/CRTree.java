@@ -69,13 +69,20 @@ public class CRTree {
     }
 
     /**
-     * Find all matching rules as flat list.
+     * Phase 02: Find all matching rules — dùng hash index thay vì linear scan.
+     * Chỉ check rules mà firstItem xuất hiện trong bitmap.
      */
     public List<Rule> findAllMatching(long[] bitmap) {
         List<Rule> matched = new ArrayList<>();
-        for (Rule rule : allRules) {
-            if (rule.matchesBitmap(bitmap)) {
-                matched.add(rule);
+        for (Map<Integer, List<Rule>> byFirst : index.values()) {
+            for (Map.Entry<Integer, List<Rule>> e : byFirst.entrySet()) {
+                int firstItem = e.getKey();
+                int idx = firstItem >> 6;
+                int bit = firstItem & 63;
+                if (idx >= bitmap.length || (bitmap[idx] & (1L << bit)) == 0) continue;
+                for (Rule r : e.getValue()) {
+                    if (r.matchesBitmap(bitmap)) matched.add(r);
+                }
             }
         }
         return matched;

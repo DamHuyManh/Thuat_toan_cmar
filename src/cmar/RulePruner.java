@@ -1,6 +1,7 @@
 package cmar;
 
 import java.util.*;
+import cmar.util.PhaseTimer;
 
 /**
  * Rule pruning (Li, Han, Pei 2001, Section 3):
@@ -22,7 +23,7 @@ public class RulePruner {
     }
 
     public RulePruner() {
-        this(3.841, 4, 0.50); // paper: chi²=3.841(p=0.05), delta=4, minConf=50%
+        this(3.841, 4, 0.50); // delta=4 cho accuracy tốt hơn
     }
 
     /**
@@ -49,28 +50,29 @@ public class RulePruner {
 
     /**
      * Phase 1: Chi-Square Pruning (paper Section 3.1).
-     * Recompute exact support/confidence, keep significant + positively correlated rules.
+     * Phase 04 OPTIMIZATION: dùng BitSet matchMatrix pre-computed (shared với coveragePrune).
      */
-    public List<Rule> chiSquarePrune(List<Rule> rules, int[][] transactions, int[] labels, long[][] bitmaps) {
+    public List<Rule> chiSquarePrune(List<Rule> rules, int[][] transactions, int[] labels,
+                                     long[][] bitmaps, BitSet[] matchMatrix,
+                                     Map<Integer, BitSet> classMasks, Map<Integer, Integer> classSupports) {
         int N = transactions.length;
 
-        Map<Integer, Integer> classSupports = new HashMap<>();
-        for (int label : labels) classSupports.merge(label, 1, Integer::sum);
-
         List<Rule> pruned = new ArrayList<>();
-        for (Rule rule : rules) {
-            int antSupport = 0;
-            int exactSupport = 0;
-            for (int i = 0; i < N; i++) {
-                if (rule.matchesBitmap(bitmaps[i])) {
-                    antSupport++;
-                    if (labels[i] == rule.classLabel) {
-                        exactSupport++;
-                    }
-                }
-            }
-
+        for (int r = 0; r < rules.size(); r++) {
+            Rule rule = rules.get(r);
+            BitSet match = matchMatrix[r];
+            int antSupport = match.cardinality();
             if (antSupport == 0) continue;
+
+            // exactSupport = |match AND classMask[rule.class]|
+            BitSet cmask = classMasks.get(rule.classLabel);
+            int exactSupport = 0;
+            if (cmask != null) {
+                // Avoid cloning: iterate set bits of smaller set
+                BitSet tmp = (BitSet) match.clone();
+                tmp.and(cmask);
+                exactSupport = tmp.cardinality();
+            }
 
             rule.support = exactSupport;
             rule.antecedentSupport = antSupport;
@@ -82,7 +84,6 @@ public class RulePruner {
             double chi2 = computeChiSquare(exactSupport, antSupport, clsSupport, N);
             rule.chiSquare = chi2;
 
-            // Keep if significant AND positively correlated
             double priorProb = (double) clsSupport / N;
             if (chi2 >= chiSquareThreshold && rule.confidence > priorProb) {
                 pruned.add(rule);
@@ -93,16 +94,21 @@ public class RulePruner {
         return pruned;
     }
 
+    // Backward-compatible wrapper (for callers that still pass old signature)
+    public List<Rule> chiSquarePrune(List<Rule> rules, int[][] transactions, int[] labels, long[][] bitmaps) {
+        Map<Integer, Integer> classSupports = new HashMap<>();
+        for (int label : labels) classSupports.merge(label, 1, Integer::sum);
+        Map<Integer, BitSet> classMasks = buildClassMasks(labels);
+        BitSet[] matchMatrix = precomputeMatchMatrix(rules, bitmaps);
+        return chiSquarePrune(rules, transactions, labels, bitmaps, matchMatrix, classMasks, classSupports);
+    }
+
     /**
-     * Phase 2: General-to-Specific Pruning (paper Section 3.1, pruning method 1).
-     * "If a general rule has confidence >= a more specific rule (superset, same class),
-     * the specific rule is pruned."
+     * Phase 2: General-to-Specific Pruning — OPTIMIZED.
+     * Phase 04: partition theo class + first-item để giảm outer scan.
+     * Không còn skip khi rules>10K.
      */
     public List<Rule> generalToSpecificPrune(List<Rule> rules) {
-        // Skip if too many rules (O(n²) complexity)
-        if (rules.size() > 10000) return rules;
-
-        // Sort by length asc (general first), then confidence desc
         List<Rule> sorted = new ArrayList<>(rules);
         sorted.sort((a, b) -> {
             int lenCmp = Integer.compare(a.antecedent.length, b.antecedent.length);
@@ -110,21 +116,35 @@ public class RulePruner {
             return Double.compare(b.confidence, a.confidence);
         });
 
+        // Index kept rules by (class, first-item) để giảm subset check
+        Map<Integer, Map<Integer, List<Rule>>> indexed = new HashMap<>();
         List<Rule> result = new ArrayList<>();
-        for (int i = 0; i < sorted.size(); i++) {
-            Rule specific = sorted.get(i);
+
+        for (Rule specific : sorted) {
             boolean pruned = false;
-            for (Rule general : result) {
-                if (general.classLabel == specific.classLabel
-                        && general.antecedent.length < specific.antecedent.length
-                        && general.confidence > specific.confidence  // paper: prune lower-confidence specific rules
-                        && isSubset(general.antecedent, specific.antecedent)) {
-                    pruned = true;
-                    break;
+            int cls = specific.classLabel;
+            Map<Integer, List<Rule>> byFirst = indexed.get(cls);
+            if (byFirst != null) {
+                // General rule phải có first-item thuộc specific's antecedent
+                for (int item : specific.antecedent) {
+                    List<Rule> candidates = byFirst.get(item);
+                    if (candidates == null) continue;
+                    for (Rule general : candidates) {
+                        if (general.antecedent.length < specific.antecedent.length
+                                && general.confidence > specific.confidence
+                                && isSubset(general.antecedent, specific.antecedent)) {
+                            pruned = true;
+                            break;
+                        }
+                    }
+                    if (pruned) break;
                 }
             }
             if (!pruned) {
                 result.add(specific);
+                indexed.computeIfAbsent(cls, k -> new HashMap<>())
+                       .computeIfAbsent(specific.antecedent[0], k -> new ArrayList<>())
+                       .add(specific);
             }
         }
 
@@ -133,49 +153,85 @@ public class RulePruner {
     }
 
     /**
-     * Phase 3: Database Coverage Pruning (paper Section 3.2).
-     * Paper: "A rule is useful if it can correctly classify at least one
-     * training case not yet covered by delta higher-ranked rules."
-     *
-     * IMPORTANT: Coverage counts when rule MATCHES instance (antecedent matches),
-     * regardless of whether the class is correct. But "useful" requires correct class.
+     * Phase 3: Database Coverage Pruning — OPTIMIZED với BitSet matchMatrix.
+     * Map từ Rule object → index để lookup match BitSet sau sort.
      */
-    public List<Rule> coveragePrune(List<Rule> rules, int[][] transactions, int[] labels, long[][] bitmaps) {
+    public List<Rule> coveragePrune(List<Rule> rules, int[][] transactions, int[] labels,
+                                     long[][] bitmaps, Map<Rule, BitSet> ruleMatches,
+                                     Map<Integer, BitSet> classMasks) {
         int N = transactions.length;
         int[] coverCount = new int[N];
-        boolean[] fullyCovered = new boolean[N];
-        int coveredCount = 0;
+        BitSet notFullyCovered = new BitSet(N);
+        notFullyCovered.set(0, N);
 
         List<Rule> selected = new ArrayList<>();
 
         for (Rule rule : rules) {
-            if (coveredCount >= N) break;
+            if (notFullyCovered.isEmpty()) break;
 
-            // Rule is useful if it CORRECTLY classifies at least one not-fully-covered instance
-            boolean useful = false;
-            for (int i = 0; i < N; i++) {
-                if (!fullyCovered[i] && labels[i] == rule.classLabel && rule.matchesBitmap(bitmaps[i])) {
-                    useful = true;
-                    break;
-                }
-            }
+            BitSet match = ruleMatches.get(rule);
+            if (match == null) continue;
 
-            if (useful) {
-                selected.add(rule);
-                // Count only correctly classified instances (CBA-style coverage)
-                for (int i = 0; i < N; i++) {
-                    if (!fullyCovered[i] && labels[i] == rule.classLabel && rule.matchesBitmap(bitmaps[i])) {
-                        coverCount[i]++;
-                        if (coverCount[i] >= maxCoverageCount) {
-                            fullyCovered[i] = true;
-                            coveredCount++;
-                        }
-                    }
+            // useful = match AND classMask AND notFullyCovered non-empty
+            BitSet usefulSet = (BitSet) match.clone();
+            BitSet cmask = classMasks.get(rule.classLabel);
+            if (cmask != null) usefulSet.and(cmask);
+            usefulSet.and(notFullyCovered);
+            if (usefulSet.isEmpty()) continue;
+
+            selected.add(rule);
+            // Increment coverCount cho mọi match chưa fully covered
+            BitSet activeMatch = (BitSet) match.clone();
+            activeMatch.and(notFullyCovered);
+            for (int i = activeMatch.nextSetBit(0); i >= 0; i = activeMatch.nextSetBit(i + 1)) {
+                coverCount[i]++;
+                if (coverCount[i] >= maxCoverageCount) {
+                    notFullyCovered.clear(i);
                 }
             }
         }
-
         return selected;
+    }
+
+    // Backward-compatible wrapper
+    public List<Rule> coveragePrune(List<Rule> rules, int[][] transactions, int[] labels, long[][] bitmaps) {
+        Map<Integer, BitSet> classMasks = buildClassMasks(labels);
+        Map<Rule, BitSet> matches = new IdentityHashMap<>();
+        for (Rule r : rules) matches.put(r, computeRuleMatch(r, bitmaps));
+        return coveragePrune(rules, transactions, labels, bitmaps, matches, classMasks);
+    }
+
+    // ========== Phase 04 helpers ==========
+
+    /** Pre-compute BitSet matching mỗi rule → transactions. O(rules × N × words). */
+    public static BitSet[] precomputeMatchMatrix(List<Rule> rules, long[][] bitmaps) {
+        int N = bitmaps.length;
+        BitSet[] out = new BitSet[rules.size()];
+        for (int r = 0; r < rules.size(); r++) {
+            BitSet bs = new BitSet(N);
+            Rule rule = rules.get(r);
+            for (int i = 0; i < N; i++) {
+                if (rule.matchesBitmap(bitmaps[i])) bs.set(i);
+            }
+            out[r] = bs;
+        }
+        return out;
+    }
+
+    public static BitSet computeRuleMatch(Rule rule, long[][] bitmaps) {
+        BitSet bs = new BitSet(bitmaps.length);
+        for (int i = 0; i < bitmaps.length; i++) {
+            if (rule.matchesBitmap(bitmaps[i])) bs.set(i);
+        }
+        return bs;
+    }
+
+    public static Map<Integer, BitSet> buildClassMasks(int[] labels) {
+        Map<Integer, BitSet> out = new HashMap<>();
+        for (int i = 0; i < labels.length; i++) {
+            out.computeIfAbsent(labels[i], k -> new BitSet(labels.length)).set(i);
+        }
+        return out;
     }
 
     private boolean isSubset(int[] sub, int[] sup) {
@@ -195,10 +251,239 @@ public class RulePruner {
      * 3. Database coverage pruning
      */
     public List<Rule> prune(List<Rule> rules, int[][] transactions, int[] labels) {
+        if (cmar.util.OptimizationProfile.isBaseline()) {
+            return pruneBaseline(rules, transactions, labels);
+        }
+        PhaseTimer.start("prune_bitmap");
         long[][] bitmaps = buildBitmaps(transactions);
-        List<Rule> afterChi = chiSquarePrune(rules, transactions, labels, bitmaps);
-        // Skip G2S: for high-dim datasets it prunes too aggressively (Sonar crashes)
-        return coveragePrune(afterChi, transactions, labels, bitmaps);
+        Map<Integer, Integer> classSupports = new HashMap<>();
+        for (int label : labels) classSupports.merge(label, 1, Integer::sum);
+        Map<Integer, BitSet> classMasks = buildClassMasks(labels);
+        Map<Integer, BitSet> itemIndex = buildItemIndex(transactions, labels.length);
+        PhaseTimer.stop("prune_bitmap");
+
+        PhaseTimer.start("prune_chisquare");
+        Map<Rule, BitSet> keptMatches = new IdentityHashMap<>();
+        List<Rule> afterChi = chiSquarePruneInverted(rules, bitmaps.length, itemIndex,
+                                                      classMasks, classSupports, keptMatches);
+        PhaseTimer.stop("prune_chisquare");
+
+        PhaseTimer.start("prune_g2s");
+        List<Rule> afterG2S = generalToSpecificPrune(afterChi);
+        PhaseTimer.stop("prune_g2s");
+
+        PhaseTimer.start("prune_coverage");
+        List<Rule> out = coveragePrune(afterG2S, transactions, labels, bitmaps,
+                                        keptMatches, classMasks);
+        PhaseTimer.stop("prune_coverage");
+        return out;
+    }
+
+    /** BASELINE pruning path: original chi² + G2S + coverage (no BitSet opt). */
+    public List<Rule> pruneBaseline(List<Rule> rules, int[][] transactions, int[] labels) {
+        PhaseTimer.start("prune_bitmap");
+        long[][] bitmaps = buildBitmaps(transactions);
+        PhaseTimer.stop("prune_bitmap");
+        PhaseTimer.start("prune_chisquare");
+        List<Rule> afterChi = chiSquarePruneOld(rules, transactions, labels, bitmaps);
+        PhaseTimer.stop("prune_chisquare");
+        PhaseTimer.start("prune_g2s");
+        List<Rule> afterG2S = generalToSpecificPruneOld(afterChi);
+        PhaseTimer.stop("prune_g2s");
+        PhaseTimer.start("prune_coverage");
+        List<Rule> out = coveragePruneOld(afterG2S, transactions, labels, bitmaps);
+        PhaseTimer.stop("prune_coverage");
+        return out;
+    }
+
+    private List<Rule> chiSquarePruneOld(List<Rule> rules, int[][] transactions, int[] labels, long[][] bitmaps) {
+        int N = transactions.length;
+        Map<Integer, Integer> classSupports = new HashMap<>();
+        for (int label : labels) classSupports.merge(label, 1, Integer::sum);
+        List<Rule> pruned = new ArrayList<>();
+        for (Rule rule : rules) {
+            int antSupport = 0, exactSupport = 0;
+            for (int i = 0; i < N; i++) {
+                if (rule.matchesBitmap(bitmaps[i])) {
+                    antSupport++;
+                    if (labels[i] == rule.classLabel) exactSupport++;
+                }
+            }
+            if (antSupport == 0) continue;
+            rule.support = exactSupport;
+            rule.antecedentSupport = antSupport;
+            rule.confidence = (double) exactSupport / antSupport;
+            if (rule.confidence < minConfidence) continue;
+            int clsSupport = classSupports.getOrDefault(rule.classLabel, 0);
+            double chi2 = computeChiSquare(exactSupport, antSupport, clsSupport, N);
+            rule.chiSquare = chi2;
+            double priorProb = (double) clsSupport / N;
+            if (chi2 >= chiSquareThreshold && rule.confidence > priorProb) pruned.add(rule);
+        }
+        Collections.sort(pruned);
+        return pruned;
+    }
+
+    private List<Rule> generalToSpecificPruneOld(List<Rule> rules) {
+        if (rules.size() > 10000) return rules;
+        List<Rule> sorted = new ArrayList<>(rules);
+        sorted.sort((a, b) -> {
+            int lenCmp = Integer.compare(a.antecedent.length, b.antecedent.length);
+            if (lenCmp != 0) return lenCmp;
+            return Double.compare(b.confidence, a.confidence);
+        });
+        List<Rule> result = new ArrayList<>();
+        for (Rule specific : sorted) {
+            boolean pruned = false;
+            for (Rule general : result) {
+                if (general.classLabel == specific.classLabel
+                        && general.antecedent.length < specific.antecedent.length
+                        && general.confidence > specific.confidence
+                        && isSubset(general.antecedent, specific.antecedent)) {
+                    pruned = true; break;
+                }
+            }
+            if (!pruned) result.add(specific);
+        }
+        Collections.sort(result);
+        return result;
+    }
+
+    private List<Rule> coveragePruneOld(List<Rule> rules, int[][] transactions, int[] labels, long[][] bitmaps) {
+        int N = transactions.length;
+        int[] coverCount = new int[N];
+        boolean[] fullyCovered = new boolean[N];
+        int coveredCount = 0;
+        List<Rule> selected = new ArrayList<>();
+        for (Rule rule : rules) {
+            if (coveredCount >= N) break;
+            boolean useful = false;
+            for (int i = 0; i < N; i++) {
+                if (!fullyCovered[i] && labels[i] == rule.classLabel && rule.matchesBitmap(bitmaps[i])) {
+                    useful = true; break;
+                }
+            }
+            if (useful) {
+                selected.add(rule);
+                for (int i = 0; i < N; i++) {
+                    if (!fullyCovered[i] && rule.matchesBitmap(bitmaps[i])) {
+                        coverCount[i]++;
+                        if (coverCount[i] >= maxCoverageCount) {
+                            fullyCovered[i] = true; coveredCount++;
+                        }
+                    }
+                }
+            }
+        }
+        return selected;
+    }
+
+    /** Build inverted index: item → BitSet of transactions containing item. */
+    public static Map<Integer, BitSet> buildItemIndex(int[][] transactions, int N) {
+        Map<Integer, BitSet> idx = new HashMap<>();
+        for (int i = 0; i < transactions.length; i++) {
+            for (int item : transactions[i]) {
+                idx.computeIfAbsent(item, k -> new BitSet(N)).set(i);
+            }
+        }
+        return idx;
+    }
+
+    /**
+     * Phase 04: Chi² prune with inverted index.
+     * Rule match = AND of item BitSets — O(k * N/64) per rule.
+     */
+    private List<Rule> chiSquarePruneInverted(List<Rule> rules, int N,
+                                               Map<Integer, BitSet> itemIndex,
+                                               Map<Integer, BitSet> classMasks,
+                                               Map<Integer, Integer> classSupports,
+                                               Map<Rule, BitSet> keptMatches) {
+        List<Rule> pruned = new ArrayList<>();
+        for (Rule rule : rules) {
+            // Compute match as AND of item BitSets
+            BitSet match = null;
+            boolean ok = true;
+            for (int item : rule.antecedent) {
+                BitSet ib = itemIndex.get(item);
+                if (ib == null) { ok = false; break; }
+                if (match == null) match = (BitSet) ib.clone();
+                else match.and(ib);
+                if (match.isEmpty()) { ok = false; break; }
+            }
+            if (!ok || match == null) continue;
+            int antSupport = match.cardinality();
+            if (antSupport == 0) continue;
+
+            BitSet cmask = classMasks.get(rule.classLabel);
+            int exactSupport = 0;
+            if (cmask != null) {
+                BitSet exact = (BitSet) match.clone();
+                exact.and(cmask);
+                exactSupport = exact.cardinality();
+            }
+
+            rule.support = exactSupport;
+            rule.antecedentSupport = antSupport;
+            rule.confidence = (double) exactSupport / antSupport;
+            if (rule.confidence < minConfidence) continue;
+
+            int clsSupport = classSupports.getOrDefault(rule.classLabel, 0);
+            double chi2 = computeChiSquare(exactSupport, antSupport, clsSupport, N);
+            rule.chiSquare = chi2;
+
+            double priorProb = (double) clsSupport / N;
+            if (chi2 >= chiSquareThreshold && rule.confidence > priorProb) {
+                pruned.add(rule);
+                keptMatches.put(rule, match); // reuse trong coverage
+            }
+        }
+        Collections.sort(pruned);
+        return pruned;
+    }
+
+    /** Legacy — giữ lại cho backward compat, không dùng trong pipeline mới. */
+    @SuppressWarnings("unused")
+    private List<Rule> chiSquarePruneLazy(List<Rule> rules, long[][] bitmaps,
+                                           Map<Integer, BitSet> classMasks,
+                                           Map<Integer, Integer> classSupports,
+                                           Map<Rule, BitSet> keptMatches) {
+        int N = bitmaps.length;
+        List<Rule> pruned = new ArrayList<>();
+        for (Rule rule : rules) {
+            int antSupport = 0;
+            int exactSupport = 0;
+            BitSet cmask = classMasks.get(rule.classLabel);
+            // Count first pass — lightweight, no BitSet allocation
+            for (int i = 0; i < N; i++) {
+                if (rule.matchesBitmap(bitmaps[i])) {
+                    antSupport++;
+                    if (cmask != null && cmask.get(i)) exactSupport++;
+                }
+            }
+            if (antSupport == 0) continue;
+
+            rule.support = exactSupport;
+            rule.antecedentSupport = antSupport;
+            rule.confidence = (double) exactSupport / antSupport;
+            if (rule.confidence < minConfidence) continue;
+
+            int clsSupport = classSupports.getOrDefault(rule.classLabel, 0);
+            double chi2 = computeChiSquare(exactSupport, antSupport, clsSupport, N);
+            rule.chiSquare = chi2;
+
+            double priorProb = (double) clsSupport / N;
+            if (chi2 >= chiSquareThreshold && rule.confidence > priorProb) {
+                pruned.add(rule);
+                // Pass 2: build BitSet cho rule đã pass (để coverage dùng lại)
+                BitSet match = new BitSet(N);
+                for (int i = 0; i < N; i++) {
+                    if (rule.matchesBitmap(bitmaps[i])) match.set(i);
+                }
+                keptMatches.put(rule, match);
+            }
+        }
+        Collections.sort(pruned);
+        return pruned;
     }
 
     private long[][] buildBitmaps(int[][] transactions) {

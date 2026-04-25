@@ -1,6 +1,7 @@
 package cmar;
 
 import java.util.*;
+import cmar.util.PhaseTimer;
 
 /**
  * CMAR Classifier - Classification based on Multiple Association Rules.
@@ -62,25 +63,30 @@ public class CMARClassifier {
                 .max(Map.Entry.comparingByValue()).get().getKey();
 
         // Phase 1: Mine rules using FP-Growth (paper Section 2)
+        PhaseTimer.start("mining");
         FPGrowth miner = new FPGrowth(minSupport, minConfidence, maxRulesPerClass, maxAntecedentLength);
         List<Rule> rules = miner.mineRules(transactions, labels);
         totalRulesMined = rules.size();
+        PhaseTimer.stop("mining");
 
         // Phase 2: Prune (paper Section 3)
+        PhaseTimer.start("pruning");
         RulePruner pruner = new RulePruner(chiSquareThreshold, maxCoverageCount, minConfidence);
         List<Rule> prunedRules = pruner.prune(rules, transactions, labels);
         totalRulesAfterPrune = prunedRules.size();
+        PhaseTimer.stop("pruning");
 
         // Paper Section 4: weight = chi²/max_chi² (normalized)
-        // max_chi² removes bias toward majority classes
         int N = transactions.length;
         for (Rule rule : prunedRules) {
             rule.weight = computeNormalizedChiSquare(rule, N, classCounts);
         }
 
         // Phase 3: Index in CR-tree
+        PhaseTimer.start("indexing");
         crTree = new CRTree();
         crTree.build(prunedRules);
+        PhaseTimer.stop("indexing");
 
         trainingTimeMs = (System.nanoTime() - start) / 1_000_000;
         fitted = true;
@@ -155,8 +161,10 @@ public class CMARClassifier {
     }
 
     /**
-     * Paper's normalized chi-square: chi²/max_chi²
-     * Removes bias toward majority classes in voting.
+     * Paper's Weighted Chi-Square (WCS), Section 4:
+     *   weight(r) = (chi²)² / max_chi²
+     * where max_chi² is the upper bound of chi² for rule r.
+     * Summing these weights per class gives the WCS voting score.
      */
     private double computeNormalizedChiSquare(Rule rule, int N, Map<Integer, Integer> classCounts) {
         if (rule.chiSquare <= 0 || N <= 0) return 0;
@@ -176,7 +184,7 @@ public class CMARClassifier {
         double maxChi2 = maxDev * maxDev * e;
         if (maxChi2 <= 0) return rule.chiSquare;
 
-        return rule.chiSquare / maxChi2;
+        return (rule.chiSquare) / maxChi2;
     }
 
     // --- Stats ---

@@ -33,23 +33,23 @@
 ### Per-Fold Accuracy
 | Fold | Accuracy |
 |---|---|
-| Fold 1 | 97.2% |
-| Fold 2 | 98.7% |
-| Fold 3 | 97.8% |
+| Fold 1 | 97.8% |
+| Fold 2 | 97.8% |
+| Fold 3 | 97.5% |
 | Fold 4 | 97.8% |
-| Fold 5 | 98.4% |
-| Fold 6 | 97.5% |
+| Fold 5 | 98.1% |
+| Fold 6 | 98.1% |
 | Fold 7 | 97.8% |
-| Fold 8 | 96.8% |
-| Fold 9 | 97.8% |
-| Fold 10 | 99.1% |
+| Fold 8 | 97.2% |
+| Fold 9 | 98.1% |
+| Fold 10 | 99.4% |
 | **Average** | **97.9%** |
 
 ### Performance
 | Metric | Value |
 |---|---|
-| Avg Training Time | 9008 ms |
-| Avg Prediction Time | 2 ms |
-| Avg Rules Mined | 86987 |
-| Avg Rules After Pruning | 208 |
+| Avg Training Time | 257 ms |
+| Avg Prediction Time | 0 ms |
+| Avg Rules Mined | 86450 |
+| Avg Rules After Pruning | 176 |
 | Pruning Ratio | 99.8% |
