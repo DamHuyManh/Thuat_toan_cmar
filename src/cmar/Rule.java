@@ -14,6 +14,9 @@ public class Rule implements Comparable<Rule> {
     double confidence;
     double chiSquare;
     double weight;     // combined weight for classification
+    // Phase 07: precomputed bitmap of antecedent items for fast subset check.
+    // Lazy: built on demand by RulePruner.G2S.
+    long[] antBitmap;
 
     public Rule(int[] antecedent, int classLabel, int support, double confidence) {
         this.antecedent = antecedent;
@@ -27,6 +30,9 @@ public class Rule implements Comparable<Rule> {
 
     /**
      * CMAR rule ordering: confidence desc, support desc, rule length asc.
+     * Phase 08: extra tie-breakers (item-by-item, then classLabel) so ordering
+     * is FULLY DETERMINISTIC regardless of insertion order — needed because
+     * parallel mining inserts rules in non-deterministic order.
      */
     @Override
     public int compareTo(Rule other) {
@@ -34,7 +40,15 @@ public class Rule implements Comparable<Rule> {
             return Double.compare(other.confidence, this.confidence);
         if (this.support != other.support)
             return Integer.compare(other.support, this.support);
-        return Integer.compare(this.antecedent.length, other.antecedent.length);
+        if (this.antecedent.length != other.antecedent.length)
+            return Integer.compare(this.antecedent.length, other.antecedent.length);
+        // Tie-breakers for determinism: lexicographic compare of antecedents, then class
+        int n = Math.min(this.antecedent.length, other.antecedent.length);
+        for (int i = 0; i < n; i++) {
+            if (this.antecedent[i] != other.antecedent[i])
+                return Integer.compare(this.antecedent[i], other.antecedent[i]);
+        }
+        return Integer.compare(this.classLabel, other.classLabel);
     }
 
     /**

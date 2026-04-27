@@ -104,11 +104,15 @@ public class RulePruner {
     }
 
     /**
-     * Phase 2: General-to-Specific Pruning — OPTIMIZED.
-     * Phase 04: partition theo class + first-item để giảm outer scan.
-     * Không còn skip khi rules>10K.
+     * Phase 2: General-to-Specific Pruning — OPTIMIZED v2 (Phase 07).
+     *
+     * Improvements over Phase 04:
+     * 1. Bitmap antecedent (long[]) for fast subset check via bitwise AND.
+     * 2. Length-bucket index: indexed[cls][firstItem][len] → only check len < L.
      */
     public List<Rule> generalToSpecificPrune(List<Rule> rules) {
+        if (rules.isEmpty()) return rules;
+
         List<Rule> sorted = new ArrayList<>(rules);
         sorted.sort((a, b) -> {
             int lenCmp = Integer.compare(a.antecedent.length, b.antecedent.length);
@@ -116,40 +120,73 @@ public class RulePruner {
             return Double.compare(b.confidence, a.confidence);
         });
 
-        // Index kept rules by (class, first-item) để giảm subset check
-        Map<Integer, Map<Integer, List<Rule>>> indexed = new HashMap<>();
+        // Determine bitmap word count from max item ID
+        int maxItem = 0;
+        for (Rule r : sorted)
+            for (int item : r.antecedent) if (item > maxItem) maxItem = item;
+        int words = (maxItem >> 6) + 1;
+
+        // Pre-compute antecedent bitmaps once
+        for (Rule r : sorted) {
+            if (r.antBitmap == null || r.antBitmap.length != words) {
+                long[] bm = new long[words];
+                for (int item : r.antecedent) bm[item >> 6] |= (1L << (item & 63));
+                r.antBitmap = bm;
+            }
+        }
+
+        // Index: indexed[cls][firstItem][len] → list of rules
+        Map<Integer, Map<Integer, Map<Integer, List<Rule>>>> indexed = new HashMap<>();
         List<Rule> result = new ArrayList<>();
 
         for (Rule specific : sorted) {
-            boolean pruned = false;
             int cls = specific.classLabel;
-            Map<Integer, List<Rule>> byFirst = indexed.get(cls);
+            int sLen = specific.antecedent.length;
+            boolean pruned = false;
+
+            Map<Integer, Map<Integer, List<Rule>>> byFirst = indexed.get(cls);
             if (byFirst != null) {
-                // General rule phải có first-item thuộc specific's antecedent
+                outer:
                 for (int item : specific.antecedent) {
-                    List<Rule> candidates = byFirst.get(item);
-                    if (candidates == null) continue;
-                    for (Rule general : candidates) {
-                        if (general.antecedent.length < specific.antecedent.length
-                                && general.confidence > specific.confidence
-                                && isSubset(general.antecedent, specific.antecedent)) {
-                            pruned = true;
-                            break;
+                    Map<Integer, List<Rule>> byLen = byFirst.get(item);
+                    if (byLen == null) continue;
+                    for (int len = 1; len < sLen; len++) {
+                        List<Rule> candidates = byLen.get(len);
+                        if (candidates == null) continue;
+                        for (Rule general : candidates) {
+                            if (general.confidence > specific.confidence
+                                    && isSubsetBitmap(general.antBitmap, specific.antBitmap)) {
+                                pruned = true;
+                                break outer;
+                            }
                         }
                     }
-                    if (pruned) break;
                 }
             }
             if (!pruned) {
                 result.add(specific);
                 indexed.computeIfAbsent(cls, k -> new HashMap<>())
-                       .computeIfAbsent(specific.antecedent[0], k -> new ArrayList<>())
+                       .computeIfAbsent(specific.antecedent[0], k -> new HashMap<>())
+                       .computeIfAbsent(sLen, k -> new ArrayList<>())
                        .add(specific);
             }
         }
 
         Collections.sort(result);
         return result;
+    }
+
+    /** Phase 07: bitwise-AND subset check. sub ⊆ sup iff for all i (sub[i] & ~sup[i]) == 0. */
+    private static boolean isSubsetBitmap(long[] sub, long[] sup) {
+        int n = Math.min(sub.length, sup.length);
+        for (int i = 0; i < n; i++) {
+            if ((sub[i] & ~sup[i]) != 0L) return false;
+        }
+        // Any bits set beyond sup.length means sub has items sup doesn't → not subset
+        for (int i = n; i < sub.length; i++) {
+            if (sub[i] != 0L) return false;
+        }
+        return true;
     }
 
     /**

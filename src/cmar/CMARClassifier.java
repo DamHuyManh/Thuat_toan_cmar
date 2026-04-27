@@ -63,9 +63,16 @@ public class CMARClassifier {
                 .max(Map.Entry.comparingByValue()).get().getKey();
 
         // Phase 1: Mine rules using FP-Growth (paper Section 2)
+        // Phase 06 IMPROVED: class-aware mining (drop useless itemsets early)
         PhaseTimer.start("mining");
-        FPGrowth miner = new FPGrowth(minSupport, minConfidence, maxRulesPerClass, maxAntecedentLength);
-        List<Rule> rules = miner.mineRules(transactions, labels);
+        List<Rule> rules;
+        if (cmar.util.OptimizationProfile.isImproved()) {
+            FPGrowthOptimized miner = new FPGrowthOptimized(minSupport, minConfidence, maxRulesPerClass, maxAntecedentLength);
+            rules = miner.mineRules(transactions, labels);
+        } else {
+            FPGrowth miner = new FPGrowth(minSupport, minConfidence, maxRulesPerClass, maxAntecedentLength);
+            rules = miner.mineRules(transactions, labels);
+        }
         totalRulesMined = rules.size();
         PhaseTimer.stop("mining");
 
