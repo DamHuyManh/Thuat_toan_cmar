@@ -9,11 +9,14 @@ import java.util.*;
 public class FPTree {
     FPNode root;
     Map<Integer, FPNode> headerTable; // item -> first node in linked list
+    // Phase 12: tail pointer per item to append header links in O(1)
+    Map<Integer, FPNode> headerTail;  // item -> last node in linked list
     Map<Integer, Integer> itemCounts;  // item -> total frequency
 
     public FPTree() {
         this.root = new FPNode(-1, 0, null);
         this.headerTable = new HashMap<>();
+        this.headerTail = new HashMap<>();
         this.itemCounts = new HashMap<>();
     }
 
@@ -49,10 +52,9 @@ public class FPTree {
             }
             if (len == 0) continue;
 
-            // Sort by frequency desc
-            int[] sorted = Arrays.copyOf(sortedItems, len);
-            sortByFrequency(sorted, freq);
-            tree.insertTransaction(sorted);
+            // Phase 14: sort in-place, avoid Arrays.copyOf per transaction
+            sortByFrequency(sortedItems, len, freq);
+            tree.insertTransaction(sortedItems, len, 1);
         }
         return tree;
     }
@@ -90,9 +92,9 @@ public class FPTree {
             }
             if (len == 0) continue;
 
-            int[] sorted = Arrays.copyOf(filtered, len);
-            sortByFrequency(sorted, freq);
-            tree.insertTransaction(sorted, count);
+            // Phase 14: sort in-place, avoid Arrays.copyOf per pattern
+            sortByFrequency(filtered, len, freq);
+            tree.insertTransaction(filtered, len, count);
         }
         return tree;
     }
@@ -101,9 +103,16 @@ public class FPTree {
         insertTransaction(items, 1);
     }
 
-    private void insertTransaction(int[] items, int count) {
+    // Phase 13: package-private để miner build conditional tree trực tiếp (tránh patterns+counts list).
+    void insertTransaction(int[] items, int count) {
+        insertTransaction(items, items.length, count);
+    }
+
+    // Phase 14: insert prefix of array (avoid per-txn array allocation)
+    void insertTransaction(int[] items, int len, int count) {
         FPNode current = root;
-        for (int item : items) {
+        for (int i = 0; i < len; i++) {
+            int item = items[i];
             FPNode child = current.getChild(item);
             if (child != null) {
                 child.count += count;
@@ -112,12 +121,13 @@ public class FPTree {
                 child = new FPNode(item, count, current);
                 current.children.put(item, child);
                 // Update header table link
-                if (headerTable.containsKey(item)) {
-                    FPNode last = headerTable.get(item);
-                    while (last.link != null) last = last.link;
-                    last.link = child;
+                FPNode tail = headerTail.get(item);
+                if (tail != null) {
+                    tail.link = child;
+                    headerTail.put(item, child);
                 } else {
                     headerTable.put(item, child);
+                    headerTail.put(item, child);
                 }
                 current = child;
             }
@@ -149,13 +159,28 @@ public class FPTree {
         return items;
     }
 
+    /**
+     * Phase 17: ghi id item trên single path vào {@code buf} (gốc → lá). Điều kiện: {@link #isSinglePath()}.
+     * Nếu {@code buf} ngắn hơn độ sâu path, chỉ ghi tới hết mảng; giá trị trả về = độ sâu thật (để caller mở rộng buffer).
+     */
+    public int collectSinglePathItemIds(int[] buf) {
+        int len = 0;
+        FPNode node = root;
+        while (!node.children.isEmpty()) {
+            node = node.children.values().iterator().next();
+            if (buf != null && len < buf.length) buf[len] = node.item;
+            len++;
+        }
+        return len;
+    }
+
     public boolean isEmpty() {
         return headerTable.isEmpty();
     }
 
-    private static void sortByFrequency(int[] items, Map<Integer, Integer> freq) {
+    private static void sortByFrequency(int[] items, int len, Map<Integer, Integer> freq) {
         // Simple insertion sort (items arrays are typically short)
-        for (int i = 1; i < items.length; i++) {
+        for (int i = 1; i < len; i++) {
             int key = items[i];
             int keyFreq = freq.getOrDefault(key, 0);
             int j = i - 1;
@@ -168,5 +193,9 @@ public class FPTree {
             }
             items[j + 1] = key;
         }
+    }
+
+    private static void sortByFrequency(int[] items, Map<Integer, Integer> freq) {
+        sortByFrequency(items, items.length, freq);
     }
 }

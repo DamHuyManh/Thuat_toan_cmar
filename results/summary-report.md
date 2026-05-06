@@ -1,77 +1,96 @@
-# CMAR Benchmark Summary Report
+# CMAR — Báo cáo benchmark (tóm tắt)
 
-**Date:** 2026-03-12
+| Mục | Nội dung |
+|---|---|
+| **Ngày chạy** | 2026-05-06 |
+| **Bài báo tham chiếu** | Li, Han, Pei — *CMAR* (IEEE ICDM 2001) |
+| **Code** | Java — bitmap matching, CR-tree có hash, chi-square + coverage pruning |
+| **Đánh giá** | 10-fold cross-validation |
 
-**Reference Paper:** Li, Han, Pei. "CMAR: Accurate and Efficient Classification Based on Multiple Class-Association Rules" (IEEE ICDM 2001)
+## Cách đọc báo cáo
 
-**Implementation:** Java (optimized with bitmap matching, hash-indexed CR-tree, chi-square + coverage pruning)
+### Bảng độ chính xác (Accuracy Comparison)
 
-**Evaluation:** 10-fold cross-validation
+- **Our CMAR:** độ chính xác (%) do chương trình của bạn đo được.
+- **Paper CMAR / Paper CBA / Paper C4.5:** số **ghi trong bài báo** để so sánh — *không* phải chạy lại CBA/C4.5 trên máy bạn.
+- **Diff:** chênh lệch **Our CMAR − Paper CMAR** (%). Dương (+) = bạn cao hơn paper; âm (−) = thấp hơn.
+- **Instances / Attrs / Classes:** số mẫu, số thuộc tính, số lớp của bộ dữ liệu.
+
+### Bảng hiệu năng (Performance Metrics)
+
+- **Train / Predict:** thời gian huấn luyện (mine + prune) và dự đoán, **trung bình theo fold** (ms). Giá trị **0 ms** thường là làm tròn (< 1 ms).
+- **Rules mined:** số luật sinh ra **trước** bước cắt tỉa.
+- **Rules after prune:** số luật **còn lại sau** prune (dùng để phân lớp). *(Tên cũ "Rules Pruned" dễ gây nhầm — đây là luật **giữ lại**, không phải số luật bị xóa.)*
+- **% Removed:** phần trăm luật thô bị loại: `100 * (1 - after/mined)` (trong bảng, *after* là cột *Rules after prune*).
+
+---
 
 ## Accuracy Comparison
 
 | Dataset | Instances | Attrs | Classes | **Our CMAR** | Paper CMAR | Paper CBA | Paper C4.5 | Diff |
 |---------|-----------|-------|---------|-------------|------------|-----------|------------|------|
-| Anneal | 898 | 38 | 6 | **97.7%** | 97.3% | 97.9% | 94.8% | +0.4% |
-| Australian | 690 | 14 | 2 | **87.0%** | 86.1% | 84.9% | 84.7% | +0.9% |
+| Anneal | 898 | 38 | 6 | **98.2%** | 97.3% | 97.9% | 94.8% | +0.9% |
+| Australian | 690 | 14 | 2 | **86.8%** | 86.1% | 84.9% | 84.7% | +0.7% |
 | Auto | 205 | 25 | 6 | **81.4%** | 78.1% | 78.3% | 80.1% | +3.3% |
-| Breast-Cancer | 683 | 9 | 2 | **96.9%** | 96.4% | 96.3% | 95.0% | +0.5% |
-| Cleve | 303 | 13 | 2 | **82.9%** | 82.2% | 82.8% | 78.2% | +0.7% |
-| Crx | 690 | 15 | 2 | **85.8%** | 84.9% | 84.7% | 84.9% | +0.9% |
+| Breast-Cancer | 683 | 9 | 2 | **97.1%** | 96.4% | 96.3% | 95.0% | +0.7% |
+| Cleve | 303 | 13 | 2 | **82.6%** | 82.2% | 82.8% | 78.2% | +0.4% |
+| Crx | 690 | 15 | 2 | **86.1%** | 84.9% | 84.7% | 84.9% | +1.2% |
 | Diabetes | 768 | 8 | 2 | **73.4%** | 75.8% | 74.5% | 74.2% | -2.4% |
-| German | 1000 | 20 | 2 | **72.8%** | 74.9% | 73.4% | 72.3% | -2.1% |
+| German | 1000 | 20 | 2 | **72.9%** | 74.9% | 73.4% | 72.3% | -2.0% |
 | Glass | 214 | 9 | 6 | **70.0%** | 70.1% | 73.9% | 68.7% | -0.1% |
 | Heart | 270 | 13 | 2 | **80.7%** | 82.2% | 81.9% | 80.8% | -1.5% |
-| Hepatitis | 155 | 19 | 2 | **82.7%** | 80.5% | 81.8% | 80.6% | +2.2% |
-| Horse | 368 | 22 | 2 | **80.7%** | 82.6% | 82.1% | 82.6% | -1.9% |
+| Hepatitis | 155 | 19 | 2 | **83.3%** | 80.5% | 81.8% | 80.6% | +2.8% |
+| Horse | 368 | 22 | 2 | **82.3%** | 82.6% | 82.1% | 82.6% | -0.3% |
 | Hypo | 3163 | 25 | 2 | **97.9%** | 98.4% | 98.9% | 99.2% | -0.5% |
-| Iono | 351 | 34 | 2 | **90.6%** | 91.5% | 92.3% | 90.0% | -0.9% |
+| Iono | 351 | 34 | 2 | **92.6%** | 91.5% | 92.3% | 90.0% | +1.1% |
 | Iris | 150 | 4 | 3 | **92.7%** | 94.0% | 94.7% | 95.3% | -1.3% |
-| Labor | 57 | 16 | 2 | **93.3%** | 89.7% | 86.3% | 79.3% | +3.6% |
-| Led7 | 3200 | 7 | 10 | **71.2%** | 72.5% | 71.9% | 73.5% | -1.3% |
-| Lymphography | 148 | 18 | 4 | **83.5%** | 83.1% | 77.8% | 73.5% | +0.4% |
+| Labor | 57 | 16 | 2 | **91.7%** | 89.7% | 86.3% | 79.3% | +2.0% |
+| Led7 | 3200 | 7 | 10 | **72.2%** | 72.5% | 71.9% | 73.5% | -0.3% |
+| Lymphography | 148 | 18 | 4 | **83.4%** | 83.1% | 77.8% | 73.5% | +0.3% |
 | Pima | 768 | 8 | 2 | **73.4%** | 75.1% | 72.9% | 75.5% | -1.7% |
-| Sick | 2800 | 29 | 2 | **96.5%** | 97.5% | 97.0% | 98.5% | -1.0% |
-| Sonar | 208 | 60 | 2 | **78.0%** | 79.4% | 77.5% | 70.2% | -1.4% |
+| Sick | 2800 | 29 | 2 | **96.8%** | 97.5% | 97.0% | 98.5% | -0.7% |
+| Sonar | 208 | 60 | 2 | **80.8%** | 79.4% | 77.5% | 70.2% | +1.4% |
 | Tic-Tac-Toe | 958 | 9 | 2 | **99.2%** | 99.2% | 99.6% | 99.4% | -0.0% |
-| Vehicle | 846 | 18 | 4 | **68.1%** | 68.8% | 68.7% | 72.6% | -0.7% |
+| Vehicle | 846 | 18 | 4 | **68.2%** | 68.8% | 68.7% | 72.6% | -0.6% |
 | Waveform | 5000 | 21 | 3 | **81.6%** | 83.2% | 80.0% | 78.1% | -1.6% |
 | Wine | 178 | 13 | 3 | **96.7%** | 95.0% | 95.0% | 92.7% | +1.7% |
 | Zoo | 101 | 16 | 7 | **96.5%** | 97.1% | 96.8% | 92.2% | -0.6% |
-| **Average** | | | | **85.0%** | 85.2% | 84.7% | 83.3% | -0.2% |
+| **Average** | | | | **85.3%** | 85.2% | 84.7% | 83.3% | +0.1% |
 
 ## Performance Metrics
 
-| Dataset | Train Time | Predict Time | Rules Mined | Rules Pruned | Prune Ratio |
-|---------|-----------|-------------|-------------|-------------|-------------|
-| Anneal | 1492 ms | 0 ms | 156588 | 92 | 99.9% |
-| Australian | 71 ms | 0 ms | 18745 | 456 | 97.6% |
-| Auto | 750 ms | 0 ms | 209009 | 208 | 99.9% |
-| Breast-Cancer | 4 ms | 0 ms | 2836 | 265 | 90.7% |
-| Cleve | 25 ms | 0 ms | 16274 | 276 | 98.3% |
-| Crx | 89 ms | 0 ms | 30762 | 559 | 98.2% |
-| Diabetes | 2 ms | 0 ms | 1585 | 213 | 86.6% |
-| German | 432 ms | 0 ms | 89483 | 981 | 98.9% |
+| Dataset | Train (ms) | Predict (ms) | Rules mined | Rules after prune | % Removed |
+|---------|------------|--------------|-------------|-------------------|----------|
+| Anneal | 601 ms | 2 ms | 156588 | 159 | 99.9% |
+| Australian | 38 ms | 0 ms | 18745 | 456 | 97.6% |
+| Auto | 488 ms | 0 ms | 209009 | 208 | 99.9% |
+| Breast-Cancer | 3 ms | 0 ms | 2836 | 265 | 90.7% |
+| Cleve | 13 ms | 0 ms | 16274 | 276 | 98.3% |
+| Crx | 37 ms | 0 ms | 30762 | 557 | 98.2% |
+| Diabetes | 1 ms | 0 ms | 1585 | 213 | 86.6% |
+| German | 143 ms | 0 ms | 89483 | 951 | 98.9% |
 | Glass | 2 ms | 0 ms | 2021 | 121 | 94.0% |
-| Heart | 23 ms | 0 ms | 15134 | 250 | 98.3% |
-| Hepatitis | 60 ms | 0 ms | 38172 | 123 | 99.7% |
-| Horse | 352 ms | 0 ms | 129386 | 394 | 99.7% |
-| Hypo | 257 ms | 0 ms | 86450 | 176 | 99.8% |
-| Iono | 905 ms | 0 ms | 129736 | 194 | 99.9% |
+| Heart | 10 ms | 0 ms | 15134 | 249 | 98.4% |
+| Hepatitis | 46 ms | 0 ms | 38172 | 122 | 99.7% |
+| Horse | 188 ms | 0 ms | 129386 | 397 | 99.7% |
+| Hypo | 227 ms | 0 ms | 86450 | 176 | 99.8% |
+| Iono | 376 ms | 0 ms | 129736 | 196 | 99.8% |
 | Iris | 0 ms | 0 ms | 90 | 30 | 66.7% |
 | Labor | 19 ms | 0 ms | 24003 | 49 | 99.8% |
-| Led7 | 3 ms | 0 ms | 242 | 111 | 54.1% |
-| Lymphography | 107 ms | 0 ms | 65800 | 147 | 99.8% |
-| Pima | 2 ms | 0 ms | 1585 | 213 | 86.6% |
-| Sick | 415 ms | 0 ms | 85874 | 146 | 99.8% |
-| Sonar | 2085 ms | 0 ms | 160000 | 134 | 99.9% |
-| Tic-Tac-Toe | 21 ms | 0 ms | 7047 | 182 | 97.4% |
-| Vehicle | 171 ms | 0 ms | 36922 | 478 | 98.7% |
-| Waveform | 1548 ms | 6 ms | 75473 | 2651 | 96.5% |
-| Wine | 27 ms | 0 ms | 16933 | 54 | 99.7% |
-| Zoo | 24 ms | 0 ms | 13758 | 35 | 99.7% |
+| Led7 | 2 ms | 0 ms | 243 | 112 | 53.9% |
+| Lymphography | 79 ms | 0 ms | 65800 | 149 | 99.8% |
+| Pima | 1 ms | 0 ms | 1585 | 213 | 86.6% |
+| Sick | 225 ms | 0 ms | 85874 | 279 | 99.7% |
+| Sonar | 1253 ms | 0 ms | 160000 | 172 | 99.9% |
+| Tic-Tac-Toe | 7 ms | 0 ms | 7047 | 182 | 97.4% |
+| Vehicle | 68 ms | 0 ms | 36922 | 477 | 98.7% |
+| Waveform | 351 ms | 7 ms | 75473 | 2650 | 96.5% |
+| Wine | 22 ms | 0 ms | 16933 | 54 | 99.7% |
+| Zoo | 16 ms | 0 ms | 13758 | 35 | 99.7% |
 
 ## Parameters Used
+
+*Tham số FP-Growth / CMAR cho từng bộ (min support dạng tỷ lệ và số giao dịch tối thiểu).*
 
 | Dataset | Min Support (ratio) | Min Support (abs) | Min Confidence |
 |---------|--------------------|--------------------|----------------|
@@ -104,18 +123,20 @@
 
 ## Key Observations
 
-- **Wins** (our > paper by >0.5%): 8/26
-- **Ties** (within 0.5%): 5/26
-- **Losses** (our < paper by >0.5%): 13/26
-- **Average accuracy difference:** -0.2%
+*So sánh **Our CMAR** với **Paper CMAR**, ngưỡng chênh lệch 0,5 điểm phần trăm.*
+
+- **Thắng / Wins** (Our > Paper hơn 0,5%): 10/26
+- **Hòa / Ties** (chênh lệch trong ±0,5%): 7/26
+- **Thua / Losses** (Our thấp hơn Paper hơn 0,5%): 9/26
+- **Chênh TB vs Paper CMAR / Average diff:** +0.1%
 
 ## Optimizations Applied
 
-1. **Bitmap rule matching** - bitwise AND for O(1) antecedent subset testing
-2. **Hash-indexed CR-tree** - class-partitioned with first-item pruning
-3. **Chi-square pruning (CSP)** - removes statistically insignificant rules (p<0.05)
-4. **Database coverage pruning (DCP)** - eliminates redundant rules
-5. **Single-path FP-tree optimization** - direct subset enumeration
-6. **Weighted voting** - weight = chi� � confidence, top-5 per class
-7. **Per-class adaptive minSupport** - rare classes (?10 instances) use support floor of 1
-8. **Max antecedent length** - capped at 4 items to reduce noise
+1. **Bitmap rule matching** — kiểm tra tiền đề bằng AND bit, tối ưu khớp luật.
+2. **Hash-indexed CR-tree** — lưu luật theo lớp, cắt nhánh nhờ mục đầu tiên.
+3. **Chi-square pruning (CSP)** — bỏ luật không có ý nghĩa thống kê (p < 0,05).
+4. **Database coverage pruning (DCP)** — bỏ luật dư thừa theo độ phủ.
+5. **Single-path FP-tree** — tối ưu khi chỉ còn một nhánh.
+6. **Weighted voting** — trọng số ≈ chi-square × confidence; top-5 mỗi lớp khi bỏ phiếu.
+7. **Per-class adaptive minSupport** — lớp hiếm (≤10 mẫu trong fold) dùng support tối thiểu 1.
+8. **Max antecedent length** — giới hạn độ dài tiền đề tối đa 4 mục.

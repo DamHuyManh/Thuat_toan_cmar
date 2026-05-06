@@ -1,8 +1,9 @@
 package cmar;
 
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * Class-aware FP-Growth (Phase 06 + Phase 08 IMPROVED).
@@ -14,6 +15,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * Thread safety: top-level items are independent subtrees. Each worker thread
  * keeps its own local output List + ruleCountPerClass; merged at end.
+ *
+ * Phase 17: emitRules chỉ duyệt lớp xuất hiện trong match (dirty histogram);
+ * mineSinglePath tái dùng BitSet + path buffer, không tạo list path mỗi lần.
  */
 public class FPGrowthOptimized {
     private final int minSupport;
@@ -22,10 +26,21 @@ public class FPGrowthOptimized {
     private final int maxAntecedentLength;
     private long miningStartTime;
     private static final long MAX_MINING_MS = 600000;
+    private static final int MAX_SINGLE_PATH_ITEMS = 15; // chống combinatorial explosion 2^n
 
     private int N;
     private Map<Integer, BitSet> itemIndex;
     private Map<Integer, BitSet> classMasks;
+
+    /** Phase 10: nhãn giao dịch; histogram emit dùng ThreadLocal (an toàn với mining song song). */
+    private int[] trainLabels;
+    private int labelHistSize;
+    private static final ThreadLocal<int[]> TL_LABEL_HIST = new ThreadLocal<>();
+    private static final ThreadLocal<int[]> TL_LABEL_DIRTY = new ThreadLocal<>();
+    // Phase 13: buffer tái dùng để đọc path từ FP-node về root (giảm cấp phát List<Integer>)
+    private static final ThreadLocal<int[]> TL_PATH_BUF = new ThreadLocal<>();
+    /** Phase 17: BitSet scratch cho mineSinglePath (tránh clone mỗi mask). */
+    private static final ThreadLocal<BitSet> TL_SINGLE_PATH_MATCH = new ThreadLocal<>();
 
     // Phase 08: parallel threshold — only parallelize when mining is heavy enough to amortize thread overhead.
     // For small datasets, sequential is faster.
@@ -39,9 +54,22 @@ public class FPGrowthOptimized {
         this.maxAntecedentLength = maxAntecedentLength;
     }
 
+    /**
+     * Phase 10: chỉ mục item sau mining — trùng semantic với {@link RulePruner#buildItemIndex},
+     * cho phép pruning tái dùng, tránh quét lại toàn bộ giao dịch.
+     */
+    public Map<Integer, BitSet> getItemIndex() {
+        return itemIndex;
+    }
+
     public List<Rule> mineRules(int[][] transactions, int[] labels) {
         this.N = transactions.length;
+        this.trainLabels = labels;
         this.miningStartTime = System.currentTimeMillis();
+
+        int maxLab = 0;
+        for (int L : labels) if (L > maxLab) maxLab = L;
+        this.labelHistSize = maxLab + 1;
 
         // Build inverted index once (sequential — small overhead)
         itemIndex = new HashMap<>();
@@ -109,22 +137,16 @@ public class FPGrowthOptimized {
             return out;
         }
 
-        ExecutorService exec = Executors.newFixedThreadPool(nThreads);
-        List<Future<List<Rule>>> futures = new ArrayList<>();
+        // Phase 10: ForkJoinPool.commonPool — tránh tạo/hủy FixedThreadPool mỗi lần mine (giảm overhead OS).
+        ForkJoinPool pool = ForkJoinPool.commonPool();
+        List<CompletableFuture<List<Rule>>> futures = new ArrayList<>(items.size());
         for (Map.Entry<Integer, Integer> entry : items) {
             final int item = entry.getKey();
-            futures.add(exec.submit(() -> mineSingleItem(tree, prefix, parentMatch, item, sharedRuleCount)));
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> mineSingleItem(tree, prefix, parentMatch, item, sharedRuleCount), pool));
         }
-
         List<Rule> merged = new ArrayList<>();
-        try {
-            for (Future<List<Rule>> f : futures) merged.addAll(f.get());
-        } catch (InterruptedException | ExecutionException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        } finally {
-            exec.shutdown();
-        }
+        for (CompletableFuture<List<Rule>> f : futures) merged.addAll(f.join());
         return merged;
     }
 
@@ -155,27 +177,91 @@ public class FPGrowthOptimized {
     }
 
     private FPTree buildConditionalTree(FPTree tree, int item) {
-        List<int[]> patterns = new ArrayList<>();
-        List<Integer> counts = new ArrayList<>();
         FPNode node = tree.headerTable.get(item);
-        while (node != null) {
-            List<Integer> path = new ArrayList<>();
-            FPNode p = node.parent;
+        if (node == null) return new FPTree();
+
+        // Pass 1: count weighted frequencies in conditional pattern base
+        Map<Integer, Integer> freq = new HashMap<>();
+        int[] buf = TL_PATH_BUF.get();
+        if (buf == null) { buf = new int[64]; TL_PATH_BUF.set(buf); }
+
+        FPNode cur = node;
+        while (cur != null) {
+            int cnt = cur.count;
+            FPNode p = cur.parent;
+            int len = 0;
             while (p != null && !p.isRoot()) {
-                path.add(p.item);
+                if (len >= buf.length) {
+                    buf = Arrays.copyOf(buf, buf.length * 2);
+                    TL_PATH_BUF.set(buf);
+                }
+                buf[len++] = p.item;
                 p = p.parent;
             }
-            if (!path.isEmpty()) {
-                int[] pat = new int[path.size()];
-                for (int i = 0; i < path.size(); i++)
-                    pat[i] = path.get(path.size() - 1 - i);
-                patterns.add(pat);
-                counts.add(node.count);
+            for (int i = 0; i < len; i++) {
+                freq.merge(buf[i], cnt, Integer::sum);
             }
-            node = node.link;
+            cur = cur.link;
         }
-        if (patterns.isEmpty()) return new FPTree();
-        return FPTree.buildConditional(patterns, counts, minSupport);
+
+        // Filter infrequent items
+        freq.entrySet().removeIf(e -> e.getValue() < minSupport);
+        if (freq.isEmpty()) return new FPTree();
+
+        // Precompute rank map: higher freq first (desc), tie by item asc
+        List<Map.Entry<Integer, Integer>> items = new ArrayList<>(freq.entrySet());
+        items.sort((a, b) -> {
+            int c = Integer.compare(b.getValue(), a.getValue());
+            if (c != 0) return c;
+            return Integer.compare(a.getKey(), b.getKey());
+        });
+        Map<Integer, Integer> rank = new HashMap<>(items.size() * 2);
+        for (int i = 0; i < items.size(); i++) rank.put(items.get(i).getKey(), i);
+
+        // Pass 2: insert filtered paths into conditional FP-tree
+        FPTree out = new FPTree();
+        out.itemCounts = freq;
+        cur = node;
+        while (cur != null) {
+            int cnt = cur.count;
+            FPNode p = cur.parent;
+            int len = 0;
+            while (p != null && !p.isRoot()) {
+                int it = p.item;
+                if (freq.containsKey(it)) {
+                    if (len >= buf.length) {
+                        buf = Arrays.copyOf(buf, buf.length * 2);
+                        TL_PATH_BUF.set(buf);
+                    }
+                    buf[len++] = it;
+                }
+                p = p.parent;
+            }
+            if (len > 0) {
+                // reverse buf[0..len) to get root→leaf order, then sort by rank (freq desc)
+                for (int i = 0, j = len - 1; i < j; i++, j--) {
+                    int t = buf[i]; buf[i] = buf[j]; buf[j] = t;
+                }
+                // insertion sort by rank (paths are short)
+                for (int i = 1; i < len; i++) {
+                    int key = buf[i];
+                    int keyRank = rank.getOrDefault(key, Integer.MAX_VALUE);
+                    int j = i - 1;
+                    while (j >= 0) {
+                        int jr = rank.getOrDefault(buf[j], Integer.MAX_VALUE);
+                        if (jr > keyRank) {
+                            buf[j + 1] = buf[j];
+                            j--;
+                        } else break;
+                    }
+                    buf[j + 1] = key;
+                }
+                // Phase 14: avoid Arrays.copyOf; FPTree can insert prefix directly
+                out.insertTransaction(buf, len, cnt);
+            }
+            cur = cur.link;
+        }
+        return out;
     }
 
     /**
@@ -187,7 +273,6 @@ public class FPGrowthOptimized {
         if (tree.isEmpty()) return;
         if (prefix.length >= maxAntecedentLength) return;
         if (System.currentTimeMillis() - miningStartTime > MAX_MINING_MS) return;
-        if (allClassesFull(ruleCount)) return;
 
         if (tree.isSinglePath()) {
             mineSinglePath(tree, prefix, parentMatch, output, ruleCount);
@@ -228,42 +313,100 @@ public class FPGrowthOptimized {
      */
     private void emitRules(int[] itemset, BitSet match, int totalMatches,
                             List<Rule> output, Map<Integer, AtomicInteger> ruleCount) {
-        for (Map.Entry<Integer, BitSet> e : classMasks.entrySet()) {
-            int cls = e.getKey();
-            BitSet inter = (BitSet) match.clone();
-            inter.and(e.getValue());
-            int clsSup = inter.cardinality();
-            if (clsSup < minSupport) continue;
-            double conf = (double) clsSup / totalMatches;
-            if (conf < minConfidence) continue;
-
-            output.add(new Rule(itemset.clone(), cls, clsSup, conf));
+        int[] hist = TL_LABEL_HIST.get();
+        if (hist == null || hist.length < labelHistSize) {
+            hist = new int[labelHistSize];
+            TL_LABEL_HIST.set(hist);
         }
-    }
-
-    /** No-op now (cap moved to post-sort). Kept to preserve recursion signature. */
-    private boolean allClassesFull(Map<Integer, AtomicInteger> ruleCount) {
-        return false;
+        int[] dirtyBuf = TL_LABEL_DIRTY.get();
+        if (dirtyBuf == null || dirtyBuf.length < 64) {
+            dirtyBuf = new int[64];
+            TL_LABEL_DIRTY.set(dirtyBuf);
+        }
+        // Phase 10: một vòng quét match → histogram nhãn (trùng intersectCardinality vs classMask).
+        int dirtyCount = 0;
+        boolean histOverflow = false;
+        for (int i = match.nextSetBit(0); i >= 0; i = match.nextSetBit(i + 1)) {
+            int lab = trainLabels[i];
+            if (hist[lab] == 0) {
+                if (dirtyCount >= dirtyBuf.length) {
+                    histOverflow = true;
+                    break;
+                }
+                dirtyBuf[dirtyCount++] = lab;
+            }
+            hist[lab]++;
+        }
+        if (histOverflow) {
+            Arrays.fill(hist, 0);
+            for (int i = match.nextSetBit(0); i >= 0; i = match.nextSetBit(i + 1)) {
+                hist[trainLabels[i]]++;
+            }
+        }
+        // Phase 17: chỉ thử các lớp có trong match (dirtyBuf), không quét toàn bộ classMasks
+        if (histOverflow) {
+            for (int cls = 0; cls < labelHistSize; cls++) {
+                int clsSup = hist[cls];
+                if (clsSup < minSupport) continue;
+                double conf = (double) clsSup / totalMatches;
+                if (conf < minConfidence) continue;
+                output.add(new Rule(itemset.clone(), cls, clsSup, conf));
+            }
+        } else {
+            for (int j = 0; j < dirtyCount; j++) {
+                int cls = dirtyBuf[j];
+                int clsSup = hist[cls];
+                if (clsSup < minSupport) continue;
+                double conf = (double) clsSup / totalMatches;
+                if (conf < minConfidence) continue;
+                output.add(new Rule(itemset.clone(), cls, clsSup, conf));
+            }
+        }
+        if (!histOverflow) {
+            for (int j = 0; j < dirtyCount; j++) {
+                hist[dirtyBuf[j]] = 0;
+            }
+        } else {
+            Arrays.fill(hist, 0);
+        }
     }
 
     private void mineSinglePath(FPTree tree, int[] prefix, BitSet parentMatch,
                                   List<Rule> output, Map<Integer, AtomicInteger> ruleCount) {
-        List<int[]> pathItems = tree.getSinglePathItems();
+        int[] buf = TL_PATH_BUF.get();
+        if (buf == null) {
+            buf = new int[64];
+            TL_PATH_BUF.set(buf);
+        }
+        int pathLen;
+        while (true) {
+            pathLen = tree.collectSinglePathItemIds(buf);
+            if (pathLen <= buf.length) break;
+            buf = Arrays.copyOf(buf, pathLen + 16);
+            TL_PATH_BUF.set(buf);
+        }
         int maxExtra = maxAntecedentLength - prefix.length;
-        int n = Math.min(pathItems.size(), Math.min(15, maxExtra > 0 ? 15 : 0));
+        int n = Math.min(pathLen, Math.min(MAX_SINGLE_PATH_ITEMS, maxExtra > 0 ? MAX_SINGLE_PATH_ITEMS : 0));
         if (n <= 0) return;
+
+        BitSet match = TL_SINGLE_PATH_MATCH.get();
+        if (match == null) {
+            match = new BitSet(N);
+            TL_SINGLE_PATH_MATCH.set(match);
+        }
+
+        int[] add = new int[MAX_SINGLE_PATH_ITEMS];
 
         for (int mask = 1; mask < (1 << n); mask++) {
             if (Integer.bitCount(mask) + prefix.length > maxAntecedentLength) continue;
-            if (allClassesFull(ruleCount)) return;
 
-            BitSet match = (BitSet) parentMatch.clone();
-            int[] add = new int[Integer.bitCount(mask)];
+            match.clear();
+            match.or(parentMatch);
             int k = 0;
             boolean ok = true;
             for (int i = 0; i < n; i++) {
                 if ((mask & (1 << i)) != 0) {
-                    int it = pathItems.get(i)[0];
+                    int it = buf[i];
                     add[k++] = it;
                     BitSet ib = itemIndex.get(it);
                     if (ib == null) { ok = false; break; }
@@ -274,9 +417,9 @@ public class FPGrowthOptimized {
             int total = match.cardinality();
             if (total < minSupport) continue;
 
-            int[] newItemset = new int[prefix.length + add.length];
+            int[] newItemset = new int[prefix.length + k];
             System.arraycopy(prefix, 0, newItemset, 0, prefix.length);
-            System.arraycopy(add, 0, newItemset, prefix.length, add.length);
+            System.arraycopy(add, 0, newItemset, prefix.length, k);
 
             emitRules(newItemset, match, total, output, ruleCount);
         }

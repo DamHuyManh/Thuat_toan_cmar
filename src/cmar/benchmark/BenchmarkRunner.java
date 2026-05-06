@@ -4,6 +4,8 @@ import cmar.CMARClassifier;
 import cmar.util.PhaseTimer;
 import cmar.util.MemorySampler;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -15,19 +17,48 @@ public class BenchmarkRunner {
     static final String RESULTS_DIR = "results";
     static final double TUNE_TRIGGER_DIFF = 2.0; // tune when gap vs paper is larger than 2%
     static final int TUNE_FOLDS = 2; // fast tuning with 2 folds
+    static int TOP_K_GLOBAL = 0; // 0 = paper-faithful (use all matched rules)
+    /** Khi true: lưới tham số quanh giá trị paper để tối đa hóa accuracy CV (khác so sánh 1–1 paper). */
+    static boolean TUNE_MAX_ACCURACY = false;
 
     public static void main(String[] args) throws IOException {
         // Phase 05: parse --mode=baseline|improved (default=improved)
         String mode = "improved";
+        boolean warmupOnly = false;
         for (String arg : args) {
             if (arg.startsWith("--mode=")) mode = arg.substring(7).toLowerCase();
+            if (arg.equalsIgnoreCase("--warmupOnly")) warmupOnly = true;
+            if (arg.equalsIgnoreCase("--tuneAccuracy")) TUNE_MAX_ACCURACY = true;
+            if (arg.startsWith("--topK=")) {
+                try { TOP_K_GLOBAL = Math.max(0, Integer.parseInt(arg.substring(7))); }
+                catch (NumberFormatException ignored) {}
+            }
         }
         if (mode.equals("baseline")) {
             cmar.util.OptimizationProfile.setMode(cmar.util.OptimizationProfile.Mode.BASELINE);
             System.out.println("=== CMAR Benchmark — BASELINE (original algorithm) ===\n");
         } else {
             cmar.util.OptimizationProfile.setMode(cmar.util.OptimizationProfile.Mode.IMPROVED);
-            System.out.println("=== CMAR Benchmark — IMPROVED (inverted index + BitSet AND) ===\n");
+            if (TOP_K_GLOBAL > 0) {
+                System.out.println("=== CMAR Benchmark — IMPROVED (topK=" + TOP_K_GLOBAL + ") ===\n");
+            } else {
+                System.out.println("=== CMAR Benchmark — IMPROVED (inverted index + BitSet AND) ===\n");
+            }
+            if (TUNE_MAX_ACCURACY) {
+                System.out.println("** --tuneAccuracy: tối đa hóa accuracy (lưới tham số / fold nhanh) **\n");
+            }
+        }
+
+        // Warmup mode: chạy nhanh 1 dataset nặng để JIT ổn định, không ghi report
+        if (warmupOnly) {
+            // Quan trọng: KHÔNG gọi getAllDatasets() vì nó sẽ load đủ 26 dataset.
+            // Warmup chỉ cần 1 dataset đại diện (Waveform) để JIT compile hot path.
+            UCIDatasets.Dataset ds = UCIDatasets.loadWaveform();
+            if (ds != null) {
+                System.out.println("Warmup: " + ds.name + " (no reports) ...");
+                runBenchmark(ds);
+            }
+            return;
         }
 
         new File(RESULTS_DIR).mkdirs();
@@ -79,7 +110,7 @@ public class BenchmarkRunner {
         String f = RESULTS_DIR + "/profiling-metrics.md";
         StringBuilder sb = new StringBuilder();
         sb.append("# CMAR Profiling Metrics — Baseline\n\n");
-        sb.append("**Date:** 2026-04-23\n");
+        sb.append("**Date:** ").append(LocalDate.now()).append("\n");
         sb.append("**Source:** Phase 01 Baseline Measurement Infrastructure\n\n");
         sb.append("## Per-phase timing + peak memory\n\n");
         sb.append("| Dataset | N | Train (ms) | Mine (ms) | Prune (ms) | ChiSq (ms) | G2S (ms) | Cov (ms) | Bmap (ms) | Index (ms) | Predict (ms) | Peak MB | Rules (raw→pruned) |\n");
@@ -138,14 +169,22 @@ public class BenchmarkRunner {
 
         EvalResult best = baseEval;
         double baseDiff = Math.abs(baseEval.accuracy * 100 - ds.paperCMARAccuracy);
-        // Skip tuning for very small datasets or high-dimensional ones (too slow)
-        boolean canTune = false; // Paper dùng CÙNG params cho tất cả datasets
-        if (canTune && baseDiff > TUNE_TRIGGER_DIFF) {
-            ParamConfig tuned = tuneConfig(ds, folds, foldAssignment, base);
+        // Mặc định không tune — giữ đúng tham số paper từng bộ (+ coverage=4 trong ParamConfig.base).
+        // --tuneAccuracy: bật lưới để cao nhất độ chính xác CV (chậm hơn nhiều).
+        boolean canTuneMatchPaper = false;
+        boolean canTune = canTuneMatchPaper && baseDiff > TUNE_TRIGGER_DIFF;
+        if (canTuneMatchPaper && canTune) {
+            ParamConfig tuned = tuneConfigMatchPaper(ds, folds, foldAssignment, base);
             EvalResult tunedEval = evaluateConfig(ds, folds, foldAssignment, tuned, folds);
 
             double tunedDiff = Math.abs(tunedEval.accuracy * 100 - ds.paperCMARAccuracy);
             if (tunedDiff < baseDiff || (Math.abs(tunedDiff - baseDiff) < 1e-9 && tunedEval.accuracy > baseEval.accuracy)) {
+                best = tunedEval;
+            }
+        } else if (TUNE_MAX_ACCURACY) {
+            ParamConfig tuned = tuneConfigMaxAccuracy(ds, folds, foldAssignment, base);
+            EvalResult tunedEval = evaluateConfig(ds, folds, foldAssignment, tuned, folds);
+            if (isBetterAccuracyEval(tunedEval, baseEval)) {
                 best = tunedEval;
             }
         }
@@ -230,6 +269,12 @@ public class BenchmarkRunner {
             CMARClassifier cmar = new CMARClassifier(
                     cfg.minSupport, cfg.minConfidence, cfg.chiThreshold,
                     cfg.maxCoverageCount, cfg.maxRules, cfg.maxAntecedentLen);
+            if (TOP_K_GLOBAL > 0) {
+                cmar = new CMARClassifier(
+                        cfg.minSupport, cfg.minConfidence, cfg.chiThreshold,
+                        cfg.maxCoverageCount, cfg.maxRules, cfg.maxAntecedentLen,
+                        TOP_K_GLOBAL);
+            }
 
             PhaseTimer.reset();
             MemorySampler mem = new MemorySampler(20);
@@ -282,7 +327,8 @@ public class BenchmarkRunner {
         return result;
     }
 
-    private static ParamConfig tuneConfig(UCIDatasets.Dataset ds, int folds, int[] foldAssignment, ParamConfig base) {
+    /** Ưu tiên nhỏ nhất \|acc − paper|; hòa thì accuracy cao hơn. */
+    private static ParamConfig tuneConfigMatchPaper(UCIDatasets.Dataset ds, int folds, int[] foldAssignment, ParamConfig base) {
         ParamConfig bestCfg = base;
         EvalResult bestEval = evaluateConfig(ds, folds, foldAssignment, base, TUNE_FOLDS);
         double bestDiff = Math.abs(bestEval.accuracy * 100 - ds.paperCMARAccuracy);
@@ -331,6 +377,72 @@ public class BenchmarkRunner {
                     double diff = Math.abs(eval.accuracy * 100 - ds.paperCMARAccuracy);
                     if (diff < bestDiff || (Math.abs(diff - bestDiff) < 1e-9 && eval.accuracy > bestEval.accuracy)) {
                         bestDiff = diff;
+                        bestEval = eval;
+                        bestCfg = candidate;
+                    }
+                }
+            }
+        }
+
+        return bestCfg;
+    }
+
+    /** Accuracy CV cao hơn là tốt; hòa thì ít luật sau prune hơn (mô hình gọn); hòa nữa thì train nhanh hơn. */
+    private static boolean isBetterAccuracyEval(EvalResult cand, EvalResult cur) {
+        if (cand.accuracy > cur.accuracy + 1e-12) return true;
+        if (Math.abs(cand.accuracy - cur.accuracy) > 1e-12) return false;
+        if (cand.avgRulesPruned < cur.avgRulesPruned) return true;
+        if (cand.avgRulesPruned > cur.avgRulesPruned) return false;
+        return cand.avgTrainTimeMs < cur.avgTrainTimeMs;
+    }
+
+    /**
+     * Lưới nhỏ quanh ParamConfig.base: chỉnh tỉ lệ minSup, confidence, χ² và δ coverage / độ dài tiền đề
+     * để tối đa hóa accuracy trên TUNE_FOLDS; kết quả cuối vẫn đo lại đủ 10 fold ở runBenchmark.
+     */
+    private static ParamConfig tuneConfigMaxAccuracy(UCIDatasets.Dataset ds, int folds, int[] foldAssignment, ParamConfig base) {
+        ParamConfig bestCfg = base;
+        EvalResult bestEval = evaluateConfig(ds, folds, foldAssignment, base, TUNE_FOLDS);
+
+        // Lưới vừa phải (~9 + ~18 đánh giá × 2 fold) để không nổ thời gian trên 26 bộ
+        double[] supportScales = {0.90, 1.00, 1.10};
+        double[] confDeltas = {-0.05, 0.0, 0.05};
+        for (double scale : supportScales) {
+            for (double delta : confDeltas) {
+                ParamConfig candidate = base.with(
+                        clamp(base.minSupportRatio * scale, 0.005, 0.22),
+                        base.minConfidence + delta,
+                        base.chiThreshold,
+                        base.maxCoverageCount,
+                        base.maxAntecedentLen,
+                        base.maxRules,
+                        ds.numInstances,
+                        folds);
+                EvalResult eval = evaluateConfig(ds, folds, foldAssignment, candidate, TUNE_FOLDS);
+                if (isBetterAccuracyEval(eval, bestEval)) {
+                    bestEval = eval;
+                    bestCfg = candidate;
+                }
+            }
+        }
+
+        double[] chiThresholds = {2.706, 3.841}; // p≈0.10 vs p=0.05 — χ² nhỏ hơn có thể giữ thêm luật
+        int[] coverages = {3, 4, 5};
+        int[] antLens = {4, 5, 6};
+        for (double chi : chiThresholds) {
+            for (int coverage : coverages) {
+                for (int antLen : antLens) {
+                    ParamConfig candidate = bestCfg.with(
+                            bestCfg.minSupportRatio,
+                            bestCfg.minConfidence,
+                            chi,
+                            coverage,
+                            antLen,
+                            bestCfg.maxRules,
+                            ds.numInstances,
+                            folds);
+                    EvalResult eval = evaluateConfig(ds, folds, foldAssignment, candidate, TUNE_FOLDS);
+                    if (isBetterAccuracyEval(eval, bestEval)) {
                         bestEval = eval;
                         bestCfg = candidate;
                     }
@@ -416,15 +528,36 @@ public class BenchmarkRunner {
         String filename = RESULTS_DIR + "/summary-report.md";
         StringBuilder sb = new StringBuilder();
 
-        sb.append("# CMAR Benchmark Summary Report\n\n");
-        sb.append("**Date:** 2026-03-12\n\n");
-        sb.append("**Reference Paper:** Li, Han, Pei. \"CMAR: Accurate and Efficient Classification ");
-        sb.append("Based on Multiple Class-Association Rules\" (IEEE ICDM 2001)\n\n");
-        sb.append("**Implementation:** Java (optimized with bitmap matching, hash-indexed CR-tree, ");
-        sb.append("chi-square + coverage pruning)\n\n");
-        sb.append("**Evaluation:** 10-fold cross-validation\n\n");
-
-        // Main comparison table
+        sb.append("# CMAR \u2014 B\u00e1o c\u00e1o benchmark (t\u00f3m t\u1eaft)\n\n");
+        sb.append("| M\u1ee5c | N\u1ed9i dung |\n");
+        sb.append("|---|---|\n");
+        sb.append("| **Ng\u00e0y ch\u1ea1y** | ");
+        sb.append(LocalDate.now());
+        sb.append(" |\n");
+        sb.append("| **B\u00e0i b\u00e1o tham chi\u1ebfu** | Li, Han, Pei \u2014 *CMAR* (IEEE ICDM 2001) |\n");
+        sb.append("| **Code** | Java \u2014 bitmap matching, CR-tree c\u00f3 hash, chi-square + coverage pruning |\n");
+        sb.append("| **\u0110\u00e1nh gi\u00e1** | 10-fold cross-validation |\n");
+        if (TUNE_MAX_ACCURACY) {
+            sb.append("| **Tuning accuracy** | `--tuneAccuracy` \u2014 l\u01b0\u1edbi tham s\u1ed1 theo accuracy (2 fold nhanh), \u0111\u00f3ng b\u0103ng full 10-fold |\n");
+        }
+        if (TOP_K_GLOBAL > 0) {
+            sb.append("| **D\u1ef1 \u0111o\u00e1n** | Top-k to\u00e0n c\u1ee5c: ch\u1ec9 l\u1ea5y **");
+            sb.append(TOP_K_GLOBAL);
+            sb.append("** lu\u1eadt kh\u1edbp t\u1ed1t nh\u1ea5t khi b\u1ecf phi\u1ebfu (kh\u00e1c b\u1ea3n paper \u0111\u1ea7y \u0111\u1ee7) |\n");
+        }
+        sb.append("\n");
+        sb.append("## C\u00e1ch \u0111\u1ecdc b\u00e1o c\u00e1o\n\n");
+        sb.append("### B\u1ea3ng \u0111\u1ed9 ch\u00ednh x\u00e1c (Accuracy Comparison)\n\n");
+        sb.append("- **Our CMAR:** \u0111\u1ed9 ch\u00ednh x\u00e1c (%) do ch\u01b0\u01a1ng tr\u00ecnh c\u1ee7a b\u1ea1n \u0111o \u0111\u01b0\u1ee3c.\n");
+        sb.append("- **Paper CMAR / Paper CBA / Paper C4.5:** s\u1ed1 **ghi trong b\u00e0i b\u00e1o** \u0111\u1ec3 so s\u00e1nh \u2014 *kh\u00f4ng* ph\u1ea3i ch\u1ea1y l\u1ea1i CBA/C4.5 tr\u00ean m\u00e1y b\u1ea1n.\n");
+        sb.append("- **Diff:** ch\u00eanh l\u1ec7ch **Our CMAR \u2212 Paper CMAR** (%). D\u01b0\u01a1ng (+) = b\u1ea1n cao h\u01a1n paper; \u00e2m (\u2212) = th\u1ea5p h\u01a1n.\n");
+        sb.append("- **Instances / Attrs / Classes:** s\u1ed1 m\u1eabu, s\u1ed1 thu\u1ed9c t\u00ednh, s\u1ed1 l\u1edbp c\u1ee7a b\u1ed9 d\u1eef li\u1ec7u.\n\n");
+        sb.append("### B\u1ea3ng hi\u1ec7u n\u0103ng (Performance Metrics)\n\n");
+        sb.append("- **Train / Predict:** th\u1eddi gian hu\u1ea5n luy\u1ec7n (mine + prune) v\u00e0 d\u1ef1 \u0111o\u00e1n, **trung b\u00ecnh theo fold** (ms). Gi\u00e1 tr\u1ecb **0 ms** th\u01b0\u1eddng l\u00e0 l\u00e0m tr\u00f2n (< 1 ms).\n");
+        sb.append("- **Rules mined:** s\u1ed1 lu\u1eadt sinh ra **tr\u01b0\u1edbc** b\u01b0\u1edbc c\u1eaft t\u1ec9a.\n");
+        sb.append("- **Rules after prune:** s\u1ed1 lu\u1eadt **c\u00f2n l\u1ea1i sau** prune (d\u00f9ng \u0111\u1ec3 ph\u00e2n l\u1edbp). *(T\u00ean c\u0169 \"Rules Pruned\" d\u1ec5 g\u00e2y nh\u1ea7m \u2014 \u0111\u00e2y l\u00e0 lu\u1eadt **gi\u1eef l\u1ea1i**, kh\u00f4ng ph\u1ea3i s\u1ed1 lu\u1eadt b\u1ecb x\u00f3a.)*\n");
+        sb.append("- **% Removed:** ph\u1ea7n tr\u0103m lu\u1eadt th\u00f4 b\u1ecb lo\u1ea1i: `100 * (1 - after/mined)` (trong b\u1ea3ng, *after* l\u00e0 c\u1ed9t *Rules after prune*).\n\n");
+        sb.append("---\n\n");
         sb.append("## Accuracy Comparison\n\n");
         sb.append("| Dataset | Instances | Attrs | Classes | **Our CMAR** | Paper CMAR | Paper CBA | Paper C4.5 | Diff |\n");
         sb.append("|---------|-----------|-------|---------|-------------|------------|-----------|------------|------|\n");
@@ -449,10 +582,9 @@ public class BenchmarkRunner {
                 totalOurs / count, totalPaper / count, totalCBA / count, totalC45 / count,
                 avgDiff >= 0 ? "+" : "", avgDiff));
 
-        // Performance table
         sb.append("## Performance Metrics\n\n");
-        sb.append("| Dataset | Train Time | Predict Time | Rules Mined | Rules Pruned | Prune Ratio |\n");
-        sb.append("|---------|-----------|-------------|-------------|-------------|-------------|\n");
+        sb.append("| Dataset | Train (ms) | Predict (ms) | Rules mined | Rules after prune | % Removed |\n");
+        sb.append("|---------|------------|--------------|-------------|-------------------|----------|\n");
         for (DatasetResult r : results) {
             double pruneRatio = (r.avgRulesMined > 0)
                     ? (1.0 - (double)r.avgRulesPruned / r.avgRulesMined) * 100 : 0;
@@ -462,6 +594,7 @@ public class BenchmarkRunner {
         }
 
         sb.append("\n## Parameters Used\n\n");
+        sb.append("*Tham s\u1ed1 FP-Growth / CMAR cho t\u1eebng b\u1ed9 (min support d\u1ea1ng t\u1ef7 l\u1ec7 v\u00e0 s\u1ed1 giao d\u1ecbch t\u1ed1i thi\u1ec3u).*\n\n");
         sb.append("| Dataset | Min Support (ratio) | Min Support (abs) | Min Confidence |\n");
         sb.append("|---------|--------------------|--------------------|----------------|\n");
         for (DatasetResult r : results) {
@@ -470,6 +603,7 @@ public class BenchmarkRunner {
         }
 
         sb.append("\n## Key Observations\n\n");
+        sb.append("*So s\u00e1nh **Our CMAR** v\u1edbi **Paper CMAR**, ng\u01b0\u1ee1ng ch\u00eanh l\u1ec7ch 0,5 \u0111i\u1ec3m ph\u1ea7n tr\u0103m.*\n\n");
         int wins = 0, ties = 0, losses = 0;
         for (DatasetResult r : results) {
             double diff = r.accuracy * 100 - r.dataset.paperCMARAccuracy;
@@ -477,22 +611,22 @@ public class BenchmarkRunner {
             else if (diff < -0.5) losses++;
             else ties++;
         }
-        sb.append("- **Wins** (our > paper by >0.5%): ").append(wins).append("/").append(count).append("\n");
-        sb.append("- **Ties** (within 0.5%): ").append(ties).append("/").append(count).append("\n");
-        sb.append("- **Losses** (our < paper by >0.5%): ").append(losses).append("/").append(count).append("\n");
-        sb.append("- **Average accuracy difference:** ").append(String.format("%s%.1f%%", avgDiff >= 0 ? "+" : "", avgDiff)).append("\n\n");
+        sb.append("- **Th\u1eafng / Wins** (Our > Paper h\u01a1n 0,5%): ").append(wins).append("/").append(count).append("\n");
+        sb.append("- **H\u00f2a / Ties** (ch\u00eanh l\u1ec7ch trong \u00b10,5%): ").append(ties).append("/").append(count).append("\n");
+        sb.append("- **Thua / Losses** (Our th\u1ea5p h\u01a1n Paper h\u01a1n 0,5%): ").append(losses).append("/").append(count).append("\n");
+        sb.append("- **Ch\u00eanh TB vs Paper CMAR / Average diff:** ").append(String.format("%s%.1f%%", avgDiff >= 0 ? "+" : "", avgDiff)).append("\n\n");
 
         sb.append("## Optimizations Applied\n\n");
-        sb.append("1. **Bitmap rule matching** - bitwise AND for O(1) antecedent subset testing\n");
-        sb.append("2. **Hash-indexed CR-tree** - class-partitioned with first-item pruning\n");
-        sb.append("3. **Chi-square pruning (CSP)** - removes statistically insignificant rules (p<0.05)\n");
-        sb.append("4. **Database coverage pruning (DCP)** - eliminates redundant rules\n");
-        sb.append("5. **Single-path FP-tree optimization** - direct subset enumeration\n");
-        sb.append("6. **Weighted voting** - weight = chi² × confidence, top-5 per class\n");
-        sb.append("7. **Per-class adaptive minSupport** - rare classes (≤10 instances) use support floor of 1\n");
-        sb.append("8. **Max antecedent length** - capped at 4 items to reduce noise\n");
+        sb.append("1. **Bitmap rule matching** \u2014 ki\u1ec3m tra ti\u1ec1n \u0111\u1ec1 b\u1eb1ng AND bit, t\u1ed1i \u01b0u kh\u1edbp lu\u1eadt.\n");
+        sb.append("2. **Hash-indexed CR-tree** \u2014 l\u01b0u lu\u1eadt theo l\u1edbp, c\u1eaft nh\u00e1nh nh\u1edd m\u1ee5c \u0111\u1ea7u ti\u00ean.\n");
+        sb.append("3. **Chi-square pruning (CSP)** \u2014 b\u1ecf lu\u1eadt kh\u00f4ng c\u00f3 \u00fd ngh\u0129a th\u1ed1ng k\u00ea (p < 0,05).\n");
+        sb.append("4. **Database coverage pruning (DCP)** \u2014 b\u1ecf lu\u1eadt d\u01b0 th\u1eeba theo \u0111\u1ed9 ph\u1ee7.\n");
+        sb.append("5. **Single-path FP-tree** \u2014 t\u1ed1i \u01b0u khi ch\u1ec9 c\u00f2n m\u1ed9t nh\u00e1nh.\n");
+        sb.append("6. **Weighted voting** \u2014 tr\u1ecdng s\u1ed1 \u2248 chi-square \u00d7 confidence; top-5 m\u1ed7i l\u1edbp khi b\u1ecf phi\u1ebfu.\n");
+        sb.append("7. **Per-class adaptive minSupport** \u2014 l\u1edbp hi\u1ebfm (\u226410 m\u1eabu trong fold) d\u00f9ng support t\u1ed1i thi\u1ec3u 1.\n");
+        sb.append("8. **Max antecedent length** \u2014 gi\u1edbi h\u1ea1n \u0111\u1ed9 d\u00e0i ti\u1ec1n \u0111\u1ec1 t\u1ed1i \u0111a 4 m\u1ee5c.\n");
 
-        try (FileWriter fw = new FileWriter(filename)) {
+        try (Writer fw = new OutputStreamWriter(new FileOutputStream(filename), StandardCharsets.UTF_8)) {
             fw.write(sb.toString());
         }
     }

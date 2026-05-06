@@ -35,8 +35,8 @@
 |---|---|
 | Fold 1 | 87.5% |
 | Fold 2 | 87.5% |
-| Fold 3 | 90.9% |
-| Fold 4 | 81.0% |
+| Fold 3 | 86.4% |
+| Fold 4 | 85.7% |
 | Fold 5 | 90.0% |
 | Fold 6 | 85.0% |
 | Fold 7 | 70.0% |
@@ -48,7 +48,7 @@
 ### Performance
 | Metric | Value |
 |---|---|
-| Avg Training Time | 750 ms |
+| Avg Training Time | 488 ms |
 | Avg Prediction Time | 0 ms |
 | Avg Rules Mined | 209009 |
 | Avg Rules After Pruning | 208 |

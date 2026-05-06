@@ -3,7 +3,14 @@ package cmar.util;
 import java.util.*;
 
 /**
- * Thread-local phase timer để đo wall-clock từng giai đoạn của CMAR pipeline.
+ * Phase timer dùng ThreadLocal để đo wall-clock từng giai đoạn CMAR pipeline.
+ *
+ * <b>Trade-off ThreadLocal:</b>
+ * - Hiện tại CMAR chạy single-thread mỗi fold → ThreadLocal đơn giản, không khoá.
+ * - Nếu sau này song song hoá (parallel FP-growth, multi-fold concurrent) thì
+ *   metrics sẽ tách per-thread → cần aggregator gộp lại trước khi report.
+ * - Caller bắt buộc gọi {@link #reset()} đầu mỗi fold (BenchmarkRunner đã làm).
+ *
  * Phase 01 Baseline Measurement.
  */
 public class PhaseTimer {

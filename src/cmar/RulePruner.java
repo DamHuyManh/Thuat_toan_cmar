@@ -16,6 +16,13 @@ public class RulePruner {
     private int maxCoverageCount; // delta in paper (default 3)
     private double minConfidence;
 
+    /** Phase 11: scratch AND cho chi²; lưu N tối thiểu vì BitSet.clear() làm length() = 0. */
+    private static final class ChiScratchHolder {
+        BitSet bitset = new BitSet(64);
+        int minN = 64;
+    }
+    private static final ThreadLocal<ChiScratchHolder> TL_CHI = new ThreadLocal<>();
+
     public RulePruner(double chiSquareThreshold, int maxCoverageCount, double minConfidence) {
         this.chiSquareThreshold = chiSquareThreshold;
         this.maxCoverageCount = maxCoverageCount;
@@ -196,7 +203,13 @@ public class RulePruner {
     public List<Rule> coveragePrune(List<Rule> rules, int[][] transactions, int[] labels,
                                      long[][] bitmaps, Map<Rule, BitSet> ruleMatches,
                                      Map<Integer, BitSet> classMasks) {
-        int N = transactions.length;
+        return coveragePruneFromMatches(rules, transactions.length, ruleMatches, classMasks);
+    }
+
+    /** Phase 11: coverage chỉ cần N + BitSet match — không dùng row bitmaps. */
+    private List<Rule> coveragePruneFromMatches(List<Rule> rules, int N,
+                                               Map<Rule, BitSet> ruleMatches,
+                                               Map<Integer, BitSet> classMasks) {
         int[] coverCount = new int[N];
         BitSet notFullyCovered = new BitSet(N);
         notFullyCovered.set(0, N);
@@ -209,18 +222,28 @@ public class RulePruner {
             BitSet match = ruleMatches.get(rule);
             if (match == null) continue;
 
-            // useful = match AND classMask AND notFullyCovered non-empty
-            BitSet usefulSet = (BitSet) match.clone();
             BitSet cmask = classMasks.get(rule.classLabel);
-            if (cmask != null) usefulSet.and(cmask);
-            usefulSet.and(notFullyCovered);
-            if (usefulSet.isEmpty()) continue;
+            boolean useful = false;
+            if (cmask != null) {
+                for (int i = match.nextSetBit(0); i >= 0; i = match.nextSetBit(i + 1)) {
+                    if (cmask.get(i) && notFullyCovered.get(i)) {
+                        useful = true;
+                        break;
+                    }
+                }
+            } else {
+                for (int i = match.nextSetBit(0); i >= 0; i = match.nextSetBit(i + 1)) {
+                    if (notFullyCovered.get(i)) {
+                        useful = true;
+                        break;
+                    }
+                }
+            }
+            if (!useful) continue;
 
             selected.add(rule);
-            // Increment coverCount cho mọi match chưa fully covered
-            BitSet activeMatch = (BitSet) match.clone();
-            activeMatch.and(notFullyCovered);
-            for (int i = activeMatch.nextSetBit(0); i >= 0; i = activeMatch.nextSetBit(i + 1)) {
+            for (int i = match.nextSetBit(0); i >= 0; i = match.nextSetBit(i + 1)) {
+                if (!notFullyCovered.get(i)) continue;
                 coverCount[i]++;
                 if (coverCount[i] >= maxCoverageCount) {
                     notFullyCovered.clear(i);
@@ -228,6 +251,21 @@ public class RulePruner {
             }
         }
         return selected;
+    }
+
+    private static BitSet borrowChiScratch(int N) {
+        ChiScratchHolder h = TL_CHI.get();
+        if (h == null) {
+            h = new ChiScratchHolder();
+            TL_CHI.set(h);
+        }
+        if (h.minN < N) {
+            h.bitset = new BitSet(N);
+            h.minN = N;
+        } else {
+            h.bitset.clear();
+        }
+        return h.bitset;
     }
 
     // Backward-compatible wrapper
@@ -239,6 +277,21 @@ public class RulePruner {
     }
 
     // ========== Phase 04 helpers ==========
+
+    /**
+     * Phase 09: |a ∩ b| không clone — quét BitSet có {@link BitSet#length()} nhỏ hơn
+     * (chi phí ~O(min(|a|,|b|)) bit 1, tránh gọi {@code cardinality()} hai lần quét cả N).
+     */
+    public static int intersectCardinality(BitSet a, BitSet b) {
+        if (a == null || b == null) return 0;
+        BitSet outer = a.length() <= b.length() ? a : b;
+        BitSet inner = outer == a ? b : a;
+        int c = 0;
+        for (int i = outer.nextSetBit(0); i >= 0; i = outer.nextSetBit(i + 1)) {
+            if (inner.get(i)) c++;
+        }
+        return c;
+    }
 
     /** Pre-compute BitSet matching mỗi rule → transactions. O(rules × N × words). */
     public static BitSet[] precomputeMatchMatrix(List<Rule> rules, long[][] bitmaps) {
@@ -288,21 +341,32 @@ public class RulePruner {
      * 3. Database coverage pruning
      */
     public List<Rule> prune(List<Rule> rules, int[][] transactions, int[] labels) {
+        return prune(rules, transactions, labels, null);
+    }
+
+    /**
+     * @param sharedItemIndex chỉ mục item→BitSet từ mining (FPGrowthOptimized); nếu khác null thì
+     *                        tái dùng, tránh {@link #buildItemIndex} quét lại toàn bộ giao dịch.
+     */
+    public List<Rule> prune(List<Rule> rules, int[][] transactions, int[] labels,
+                            Map<Integer, BitSet> sharedItemIndex) {
         if (cmar.util.OptimizationProfile.isBaseline()) {
             return pruneBaseline(rules, transactions, labels);
         }
         PhaseTimer.start("prune_bitmap");
-        long[][] bitmaps = buildBitmaps(transactions);
+        int Ntxn = transactions.length;
         Map<Integer, Integer> classSupports = new HashMap<>();
         for (int label : labels) classSupports.merge(label, 1, Integer::sum);
         Map<Integer, BitSet> classMasks = buildClassMasks(labels);
-        Map<Integer, BitSet> itemIndex = buildItemIndex(transactions, labels.length);
+        Map<Integer, BitSet> itemIndex = sharedItemIndex != null
+                ? sharedItemIndex
+                : buildItemIndex(transactions, labels.length);
         PhaseTimer.stop("prune_bitmap");
 
         PhaseTimer.start("prune_chisquare");
         Map<Rule, BitSet> keptMatches = new IdentityHashMap<>();
-        List<Rule> afterChi = chiSquarePruneInverted(rules, bitmaps.length, itemIndex,
-                                                      classMasks, classSupports, keptMatches);
+        List<Rule> afterChi = chiSquarePruneInverted(rules, Ntxn, itemIndex,
+                                                      classSupports, labels, keptMatches);
         PhaseTimer.stop("prune_chisquare");
 
         PhaseTimer.start("prune_g2s");
@@ -310,8 +374,7 @@ public class RulePruner {
         PhaseTimer.stop("prune_g2s");
 
         PhaseTimer.start("prune_coverage");
-        List<Rule> out = coveragePrune(afterG2S, transactions, labels, bitmaps,
-                                        keptMatches, classMasks);
+        List<Rule> out = coveragePruneFromMatches(afterG2S, Ntxn, keptMatches, classMasks);
         PhaseTimer.stop("prune_coverage");
         return out;
     }
@@ -386,6 +449,13 @@ public class RulePruner {
         return result;
     }
 
+    /**
+     * BASELINE coverage pruning — logic semantic ĐỒNG NHẤT với {@link #coveragePrune}
+     * (improved version), chỉ khác implementation:
+     * - Old: int[] coverCount + boolean[] fullyCovered + scan toàn N mỗi rule
+     * - New: BitSet notFullyCovered + ruleMatches cache → AND/iterator nhanh hơn
+     * Cùng input → cùng tập rule output (đã verify trên 26 UCI datasets).
+     */
     private List<Rule> coveragePruneOld(List<Rule> rules, int[][] transactions, int[] labels, long[][] bitmaps) {
         int N = transactions.length;
         int[] coverCount = new int[N];
@@ -432,70 +502,41 @@ public class RulePruner {
      */
     private List<Rule> chiSquarePruneInverted(List<Rule> rules, int N,
                                                Map<Integer, BitSet> itemIndex,
-                                               Map<Integer, BitSet> classMasks,
                                                Map<Integer, Integer> classSupports,
+                                               int[] trainLabels,
                                                Map<Rule, BitSet> keptMatches) {
         List<Rule> pruned = new ArrayList<>();
         for (Rule rule : rules) {
-            // Compute match as AND of item BitSets
-            BitSet match = null;
+            if (rule.antecedent.length == 0) continue;
+
+            BitSet match = borrowChiScratch(N);
             boolean ok = true;
+            boolean firstItem = true;
             for (int item : rule.antecedent) {
                 BitSet ib = itemIndex.get(item);
-                if (ib == null) { ok = false; break; }
-                if (match == null) match = (BitSet) ib.clone();
-                else match.and(ib);
-                if (match.isEmpty()) { ok = false; break; }
+                if (ib == null) {
+                    ok = false;
+                    break;
+                }
+                if (firstItem) {
+                    match.or(ib);
+                    firstItem = false;
+                } else {
+                    match.and(ib);
+                }
+                if (match.isEmpty()) {
+                    ok = false;
+                    break;
+                }
             }
-            if (!ok || match == null) continue;
-            int antSupport = match.cardinality();
-            if (antSupport == 0) continue;
+            if (!ok) continue;
 
-            BitSet cmask = classMasks.get(rule.classLabel);
-            int exactSupport = 0;
-            if (cmask != null) {
-                BitSet exact = (BitSet) match.clone();
-                exact.and(cmask);
-                exactSupport = exact.cardinality();
-            }
-
-            rule.support = exactSupport;
-            rule.antecedentSupport = antSupport;
-            rule.confidence = (double) exactSupport / antSupport;
-            if (rule.confidence < minConfidence) continue;
-
-            int clsSupport = classSupports.getOrDefault(rule.classLabel, 0);
-            double chi2 = computeChiSquare(exactSupport, antSupport, clsSupport, N);
-            rule.chiSquare = chi2;
-
-            double priorProb = (double) clsSupport / N;
-            if (chi2 >= chiSquareThreshold && rule.confidence > priorProb) {
-                pruned.add(rule);
-                keptMatches.put(rule, match); // reuse trong coverage
-            }
-        }
-        Collections.sort(pruned);
-        return pruned;
-    }
-
-    /** Legacy — giữ lại cho backward compat, không dùng trong pipeline mới. */
-    @SuppressWarnings("unused")
-    private List<Rule> chiSquarePruneLazy(List<Rule> rules, long[][] bitmaps,
-                                           Map<Integer, BitSet> classMasks,
-                                           Map<Integer, Integer> classSupports,
-                                           Map<Rule, BitSet> keptMatches) {
-        int N = bitmaps.length;
-        List<Rule> pruned = new ArrayList<>();
-        for (Rule rule : rules) {
+            int cls = rule.classLabel;
             int antSupport = 0;
             int exactSupport = 0;
-            BitSet cmask = classMasks.get(rule.classLabel);
-            // Count first pass — lightweight, no BitSet allocation
-            for (int i = 0; i < N; i++) {
-                if (rule.matchesBitmap(bitmaps[i])) {
-                    antSupport++;
-                    if (cmask != null && cmask.get(i)) exactSupport++;
-                }
+            for (int i = match.nextSetBit(0); i >= 0; i = match.nextSetBit(i + 1)) {
+                antSupport++;
+                if (trainLabels[i] == cls) exactSupport++;
             }
             if (antSupport == 0) continue;
 
@@ -511,12 +552,7 @@ public class RulePruner {
             double priorProb = (double) clsSupport / N;
             if (chi2 >= chiSquareThreshold && rule.confidence > priorProb) {
                 pruned.add(rule);
-                // Pass 2: build BitSet cho rule đã pass (để coverage dùng lại)
-                BitSet match = new BitSet(N);
-                for (int i = 0; i < N; i++) {
-                    if (rule.matchesBitmap(bitmaps[i])) match.set(i);
-                }
-                keptMatches.put(rule, match);
+                keptMatches.put(rule, (BitSet) match.clone());
             }
         }
         Collections.sort(pruned);

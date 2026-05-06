@@ -28,7 +28,9 @@ public class FPGrowth {
     }
 
     /**
-     * Mine class association rules from dataset.
+     * Mine class association rules — BASELINE CMAR (Li, Han, Pei 2001).
+     * FP-growth itemset mining + per-itemset linear bitmap scan for rule generation.
+     * Phiên bản tối ưu xem `FPGrowthOptimized`.
      */
     public List<Rule> mineRules(int[][] transactions, int[] labels) {
         int N = transactions.length;
@@ -41,74 +43,12 @@ public class FPGrowth {
         miningStartTime = System.currentTimeMillis();
         mineItemsets(tree, new int[0], frequentItemsets);
 
-        if (cmar.util.OptimizationProfile.isBaseline()) {
-            return generateRulesBaseline(frequentItemsets, transactions, labels, N);
-        }
-
-        // Phase 03 OPTIMIZATION: Build inverted index for fast itemset support counting.
-        // itemIndex[item] = BitSet of txns containing item. Per-class masks too.
-        Map<Integer, BitSet> itemIndex = new HashMap<>();
-        for (int i = 0; i < N; i++) {
-            for (int item : transactions[i]) {
-                itemIndex.computeIfAbsent(item, k -> new BitSet(N)).set(i);
-            }
-        }
-        Map<Integer, BitSet> classMasks = new HashMap<>();
-        for (int i = 0; i < N; i++) {
-            classMasks.computeIfAbsent(labels[i], k -> new BitSet(N)).set(i);
-        }
-
-        // Step 2: Generate class association rules via BitSet AND
-        List<Rule> rules = new ArrayList<>();
-        Map<Integer, Integer> ruleCountPerClass = new HashMap<>();
-
-        for (int[] itemset : frequentItemsets) {
-            if (itemset.length == 0) continue;
-
-            // itemset support = AND of item BitSets — O(k * N/64)
-            BitSet match = null;
-            boolean ok = true;
-            for (int item : itemset) {
-                BitSet ib = itemIndex.get(item);
-                if (ib == null) { ok = false; break; }
-                if (match == null) match = (BitSet) ib.clone();
-                else match.and(ib);
-                if (match.isEmpty()) { ok = false; break; }
-            }
-            if (!ok || match == null) continue;
-            int totalMatches = match.cardinality();
-            if (totalMatches == 0) continue;
-
-            // Per-class support = |match AND classMask|
-            for (Map.Entry<Integer, BitSet> e : classMasks.entrySet()) {
-                int classLabel = e.getKey();
-                BitSet inter = (BitSet) match.clone();
-                inter.and(e.getValue());
-                int clsSup = inter.cardinality();
-                if (clsSup == 0) continue;
-                double conf = (double) clsSup / totalMatches;
-
-                if (clsSup >= minSupport && conf >= minConfidence) {
-                    int count = ruleCountPerClass.getOrDefault(classLabel, 0);
-                    if (maxRulesPerClass > 0 && count >= maxRulesPerClass) continue;
-
-                    Rule rule = new Rule(itemset.clone(), classLabel, clsSup, conf);
-                    rules.add(rule);
-                    ruleCountPerClass.merge(classLabel, 1, Integer::sum);
-                }
-            }
-        }
-
-        Collections.sort(rules);
-        return rules;
+        // Step 2: Generate class association rules (linear bitmap scan)
+        return generateRules(frequentItemsets, transactions, labels, N);
     }
 
-    /**
-     * Mine all frequent itemsets from FP-tree.
-     */
-    /** BASELINE path: generate rules via per-itemset linear bitmap scan (original CMAR). */
-    private List<Rule> generateRulesBaseline(List<int[]> frequentItemsets,
-                                              int[][] transactions, int[] labels, int N) {
+    private List<Rule> generateRules(List<int[]> frequentItemsets,
+                                      int[][] transactions, int[] labels, int N) {
         int maxItem = 0;
         for (int[] txn : transactions)
             for (int item : txn) maxItem = Math.max(maxItem, item);

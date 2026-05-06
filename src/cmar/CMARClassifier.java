@@ -17,11 +17,18 @@ public class CMARClassifier {
     private int maxCoverageCount;
     private int maxRulesPerClass;
     private int maxAntecedentLength;
+    // Top-k global matched rules voting. 0 = use all matched rules (paper-faithful).
+    private int topKGlobal;
 
     private CRTree crTree;
     private int defaultClass;
     private int maxItem;
+    /** Words in instance / rule bitmaps: (maxItem >> 6) + 1 */
+    private int bitmapWords;
     private boolean fitted;
+
+    /** Phase 16: reuse scratch bitmap in predict() to cut allocation churn. */
+    private static final ThreadLocal<long[]> TL_INSTANCE_BITMAP = new ThreadLocal<>();
 
     private int totalRulesMined;
     private int totalRulesAfterPrune;
@@ -29,24 +36,32 @@ public class CMARClassifier {
 
     public CMARClassifier() {
         // Paper defaults: minSup=1%, minConf=50%, chi²=3.841(p=0.05), delta=4
-        this(2, 0.50, 3.841, 4, 80000, 6);
+        this(2, 0.50, 3.841, 4, 80000, 6, 0);
     }
 
     public CMARClassifier(int minSupport, double minConfidence,
                           double chiSquareThreshold, int maxCoverageCount,
                           int maxRulesPerClass) {
-        this(minSupport, minConfidence, chiSquareThreshold, maxCoverageCount, maxRulesPerClass, 6);
+        this(minSupport, minConfidence, chiSquareThreshold, maxCoverageCount, maxRulesPerClass, 6, 0);
     }
 
     public CMARClassifier(int minSupport, double minConfidence,
                           double chiSquareThreshold, int maxCoverageCount,
                           int maxRulesPerClass, int maxAntecedentLength) {
+        this(minSupport, minConfidence, chiSquareThreshold, maxCoverageCount, maxRulesPerClass, maxAntecedentLength, 0);
+    }
+
+    public CMARClassifier(int minSupport, double minConfidence,
+                          double chiSquareThreshold, int maxCoverageCount,
+                          int maxRulesPerClass, int maxAntecedentLength,
+                          int topKGlobal) {
         this.minSupport = minSupport;
         this.minConfidence = minConfidence;
         this.chiSquareThreshold = chiSquareThreshold;
         this.maxCoverageCount = maxCoverageCount;
         this.maxRulesPerClass = maxRulesPerClass;
         this.maxAntecedentLength = maxAntecedentLength;
+        this.topKGlobal = Math.max(0, topKGlobal);
         this.fitted = false;
     }
 
@@ -56,6 +71,7 @@ public class CMARClassifier {
         maxItem = 0;
         for (int[] txn : transactions)
             for (int item : txn) maxItem = Math.max(maxItem, item);
+        bitmapWords = (maxItem >> 6) + 1;
 
         Map<Integer, Integer> classCounts = new HashMap<>();
         for (int label : labels) classCounts.merge(label, 1, Integer::sum);
@@ -66,9 +82,11 @@ public class CMARClassifier {
         // Phase 06 IMPROVED: class-aware mining (drop useless itemsets early)
         PhaseTimer.start("mining");
         List<Rule> rules;
+        Map<Integer, BitSet> sharedItemIndex = null;
         if (cmar.util.OptimizationProfile.isImproved()) {
             FPGrowthOptimized miner = new FPGrowthOptimized(minSupport, minConfidence, maxRulesPerClass, maxAntecedentLength);
             rules = miner.mineRules(transactions, labels);
+            sharedItemIndex = miner.getItemIndex();
         } else {
             FPGrowth miner = new FPGrowth(minSupport, minConfidence, maxRulesPerClass, maxAntecedentLength);
             rules = miner.mineRules(transactions, labels);
@@ -79,9 +97,14 @@ public class CMARClassifier {
         // Phase 2: Prune (paper Section 3)
         PhaseTimer.start("pruning");
         RulePruner pruner = new RulePruner(chiSquareThreshold, maxCoverageCount, minConfidence);
-        List<Rule> prunedRules = pruner.prune(rules, transactions, labels);
+        List<Rule> prunedRules = pruner.prune(rules, transactions, labels, sharedItemIndex);
         totalRulesAfterPrune = prunedRules.size();
         PhaseTimer.stop("pruning");
+
+        // Phase 16: one antecedent bitmap per rule sized to training item universe — fast CR-Tree match
+        for (Rule rule : prunedRules) {
+            rule.ensureAntBitmap(maxItem);
+        }
 
         // Paper Section 4: weight = chi²/max_chi² (normalized)
         int N = transactions.length;
@@ -103,40 +126,54 @@ public class CMARClassifier {
      * CMAR classification (Li, Han, Pei 2001, Section 4):
      * 1. If highest-confidence rules all predict same class -> that class
      * 2. Otherwise, weighted chi-square group voting:
-     *    sum chi² of ALL rules per class, class with highest sum wins
+     *    sum chi² of matched rules per class, class with highest sum wins
+     *
+     * Phase 15 (optional): top-K global voting — only sum weights of top-K rules
+     * in CMAR sort order. Set topKGlobal=0 to preserve paper-faithful behavior.
      */
     public int predict(int[] instance) {
         if (!fitted) throw new IllegalStateException("Not fitted");
 
-        long[] bitmap = toBitmap(instance);
+        long[] bitmap = borrowInstanceBitmap(instance);
         List<Rule> allMatched = crTree.findAllMatching(bitmap);
         if (allMatched.isEmpty()) return defaultClass;
 
         // Sort by CMAR ordering: conf desc, sup desc, len asc
         Collections.sort(allMatched);
 
-        // Step 1: If highest-confidence rules agree on one class, use it
+        // Step 1: If highest-confidence rules all predict the same class, use it
         double bestConf = allMatched.get(0).confidence;
-        Set<Integer> topClasses = new HashSet<>();
+        int unanimousClass = allMatched.get(0).classLabel;
         for (Rule r : allMatched) {
             if (r.confidence < bestConf - 1e-9) break;
-            topClasses.add(r.classLabel);
+            if (r.classLabel != unanimousClass) {
+                unanimousClass = Integer.MIN_VALUE;
+                break;
+            }
         }
-        if (topClasses.size() == 1) {
-            return topClasses.iterator().next();
+        if (unanimousClass != Integer.MIN_VALUE) {
+            return unanimousClass;
         }
 
         // Step 2: Weighted chi-square group voting (paper Section 4)
-        // Sum chi² of ALL rules in each class group
         Map<Integer, Double> classScores = new HashMap<>();
-        for (Rule r : allMatched) {
+        int limit = allMatched.size();
+        if (topKGlobal > 0) limit = Math.min(limit, topKGlobal);
+        for (int i = 0; i < limit; i++) {
+            Rule r = allMatched.get(i);
             classScores.merge(r.classLabel, r.weight, Double::sum);
         }
 
-        return classScores.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElse(defaultClass);
+        int bestClass = defaultClass;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (Map.Entry<Integer, Double> e : classScores.entrySet()) {
+            double s = e.getValue();
+            if (s > bestScore) {
+                bestScore = s;
+                bestClass = e.getKey();
+            }
+        }
+        return bestClass;
     }
 
     public int[] predict(int[][] instances) {
@@ -156,15 +193,24 @@ public class CMARClassifier {
         return (double) correct / testLabels.length;
     }
 
-    private long[] toBitmap(int[] items) {
-        int words = (maxItem >> 6) + 1;
-        long[] bitmap = new long[words];
+    /**
+     * Phase 16: ThreadLocal scratch — same dimensions as training bitmaps; cleared per predict.
+     */
+    private long[] borrowInstanceBitmap(int[] items) {
+        int w = bitmapWords;
+        long[] b = TL_INSTANCE_BITMAP.get();
+        if (b == null || b.length < w) {
+            b = new long[w];
+            TL_INSTANCE_BITMAP.set(b);
+        } else {
+            Arrays.fill(b, 0, w, 0L);
+        }
         for (int item : items) {
-            if (item <= maxItem) {
-                bitmap[item >> 6] |= (1L << (item & 63));
+            if (item >= 0 && item <= maxItem) {
+                b[item >> 6] |= (1L << (item & 63));
             }
         }
-        return bitmap;
+        return b;
     }
 
     /**
@@ -209,6 +255,8 @@ public class CMARClassifier {
         System.out.println("Training time:      " + trainingTimeMs + " ms");
         System.out.println("Default class:      " + defaultClass);
     }
+
+    public int getTopKGlobal() { return topKGlobal; }
 
     @Override
     public String toString() {

@@ -65,12 +65,37 @@ public class Rule implements Comparable<Rule> {
     }
 
     /**
+     * Ensure antecedent bitmap exists sized for item universe [0..maxItem].
+     * Phase 16: enables word-wise matchesBitmap (fewer ops than per-item when antBitmap set).
+     */
+    public void ensureAntBitmap(int maxItem) {
+        int words = (maxItem >> 6) + 1;
+        if (antBitmap != null && antBitmap.length == words) return;
+        antBitmap = new long[words];
+        for (int item : antecedent) {
+            if (item >= 0 && item <= maxItem)
+                antBitmap[item >> 6] |= (1L << (item & 63));
+        }
+    }
+
+    /**
      * Bitwise match: antecedent items checked against bitmap.
+     * Phase 16: if antBitmap present, check per 64-bit word: (bitmap[i] & mask) == mask.
      */
     public boolean matchesBitmap(long[] bitmap) {
+        long[] ab = antBitmap;
+        if (ab != null) {
+            for (int i = 0; i < ab.length; i++) {
+                long mask = ab[i];
+                if (mask == 0L) continue;
+                if (i >= bitmap.length) return false;
+                if ((bitmap[i] & mask) != mask) return false;
+            }
+            return true;
+        }
         for (int item : antecedent) {
-            int idx = item >> 6; // item / 64
-            int bit = item & 63; // item % 64
+            int idx = item >> 6;
+            int bit = item & 63;
             if (idx >= bitmap.length || (bitmap[idx] & (1L << bit)) == 0)
                 return false;
         }

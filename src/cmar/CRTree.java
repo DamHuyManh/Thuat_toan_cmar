@@ -28,6 +28,8 @@ public class CRTree {
         classLabels.clear();
 
         for (Rule rule : rules) {
+            // Defensive: rule rỗng không có ý nghĩa CMAR — skip an toàn
+            if (rule.antecedent == null || rule.antecedent.length == 0) continue;
             classLabels.add(rule.classLabel);
             index.computeIfAbsent(rule.classLabel, k -> new HashMap<>())
                  .computeIfAbsent(rule.antecedent[0], k -> new ArrayList<>())
@@ -73,7 +75,9 @@ public class CRTree {
      * Chỉ check rules mà firstItem xuất hiện trong bitmap.
      */
     public List<Rule> findAllMatching(long[] bitmap) {
-        List<Rule> matched = new ArrayList<>();
+        // Phase 16: hint capacity — fewer array copies as candidate lists grow
+        int est = allRules.isEmpty() ? 16 : Math.max(16, allRules.size() / 6);
+        List<Rule> matched = new ArrayList<>(est);
         for (Map<Integer, List<Rule>> byFirst : index.values()) {
             for (Map.Entry<Integer, List<Rule>> e : byFirst.entrySet()) {
                 int firstItem = e.getKey();
