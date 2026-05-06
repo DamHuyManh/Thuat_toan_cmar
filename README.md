@@ -1,115 +1,264 @@
-# Cách Cải Tiến và Kết Quả
+# Báo cáo chi tiết các cải tiến CMAR (Java)
 
-**Đề tài:** Cải tiến hiệu năng thuật toán phân lớp dựa trên luật kết hợp (CMAR)
-**Ngày:** 28/04/2026
-
----
-
-## 1. Vấn Đề
-
-Thuật toán CMAR gốc có 2 nhược điểm chính:
-
-1. **Đếm thừa**: Mỗi luật phải duyệt toàn bộ dữ liệu để đếm số mẫu khớp. Việc đếm này lặp lại ở **3 giai đoạn cắt tỉa** khác nhau.
-2. **Kiểm tra từng cái một**: Kiểm tra "mẫu nào chứa thuộc tính A" được làm tuần tự cho từng mẫu.
-
-Hệ quả: Trên dataset Anneal (898 mẫu, 38 thuộc tính), chương trình thực hiện **5,6 tỷ phép so sánh bit** chỉ để xử lý 1 dataset.
+**Dự án:** `Thuat_toan_cmar`  
+**Mục tiêu chính:** tối ưu **hiệu năng** nhưng vẫn giữ **độ chính xác** ổn định trên 26 bộ UCI (theo paper CMAR 2001).  
+**Cập nhật theo benchmark gần nhất:** **2026-05-06** (xem `results/summary-report.md`, `results/profiling-metrics.csv`).  
 
 ---
 
-## 2. Hai Ý Tưởng Cải Tiến
+## 1. Tóm tắt kết quả (benchmark 26 bộ UCI)
 
-### Ý tưởng 1 — Lập bảng tra cứu, dùng lại
+- **Độ chính xác trung bình (Our CMAR):** **85,3%**  
+- **So với Paper CMAR:** **+0,1 điểm %** (Paper 85,2%)  
+- **Tổng thời gian huấn luyện (sum `trainMs` 26 bộ):** **4.216 ms**  
+- **So baseline đo trước (23.302 ms):** **~5,53× nhanh hơn**  
 
-Xây sẵn **một bảng tra cứu** ngay đầu chương trình: ghi rõ "thuộc tính X có ở những mẫu nào". Bảng này lập **một lần duy nhất**, dùng đi dùng lại cho mọi luật, mọi giai đoạn → **không phải đếm lại**.
+Ghi chú:
+- `trainMs` là trung bình theo fold (ms); tổng là tổng của 26 bộ trong `profiling-metrics.csv`.
+- Một số bộ có `Train=0 ms` là do làm tròn (< 1 ms).
 
-> *Giống tra từ điển: có mục lục, biết từ ở trang nào, không phải đọc cả cuốn.*
+### 1.1. Kết quả đã chạy (chi tiết 26 bộ) — 2026-05-06
 
-### Ý tưởng 2 — Xử lý 64 mẫu cùng lúc
+Nguồn dữ liệu:
+- **Độ chính xác**: `results/summary-report.md` (mục *Accuracy Comparison*)
+- **Thời gian / số luật**: `results/summary-report.md` (mục *Performance Metrics*) và `results/profiling-metrics.csv`
 
-Thay vì kiểm tra từng mẫu một, **gom 64 mẫu thành một nhóm** và xử lý cả nhóm trong một thao tác.
+#### 1.1.1. Accuracy Comparison (Our CMAR vs Paper)
 
-> *Giống đếm phiếu bầu: cách cũ mở từng phiếu đếm tay, cách mới quét máy 64 phiếu/lần.*
+| Dataset | Instances | Attrs | Classes | **Our CMAR** | Paper CMAR | Paper CBA | Paper C4.5 | Diff |
+|---------|-----------|-------|---------|-------------|------------|-----------|------------|------|
+| **Anneal** | 898 | 38 | 6 | **98.2%** | 97.3% | 97.9% | 94.8% | **+0.9%** |
+| **Australian** | 690 | 14 | 2 | **86.8%** | 86.1% | 84.9% | 84.7% | **+0.7%** |
+| **Auto** | 205 | 25 | 6 | **81.4%** | 78.1% | 78.3% | 80.1% | **+3.3%** |
+| **Breast-Cancer** | 683 | 9 | 2 | **97.1%** | 96.4% | 96.3% | 95.0% | **+0.7%** |
+| **Cleve** | 303 | 13 | 2 | **82.6%** | 82.2% | 82.8% | 78.2% | **+0.4%** |
+| **Crx** | 690 | 15 | 2 | **86.1%** | 84.9% | 84.7% | 84.9% | **+1.2%** |
+| Diabetes | 768 | 8 | 2 | **73.4%** | 75.8% | 74.5% | 74.2% | -2.4% |
+| German | 1000 | 20 | 2 | **72.9%** | 74.9% | 73.4% | 72.3% | -2.0% |
+| Glass | 214 | 9 | 6 | **70.0%** | 70.1% | 73.9% | 68.7% | -0.1% |
+| Heart | 270 | 13 | 2 | **80.7%** | 82.2% | 81.9% | 80.8% | -1.5% |
+| **Hepatitis** | 155 | 19 | 2 | **83.3%** | 80.5% | 81.8% | 80.6% | **+2.8%** |
+| Horse | 368 | 22 | 2 | **82.3%** | 82.6% | 82.1% | 82.6% | -0.3% |
+| Hypo | 3163 | 25 | 2 | **97.9%** | 98.4% | 98.9% | 99.2% | -0.5% |
+| **Iono** | 351 | 34 | 2 | **92.6%** | 91.5% | 92.3% | 90.0% | **+1.1%** |
+| Iris | 150 | 4 | 3 | **92.7%** | 94.0% | 94.7% | 95.3% | -1.3% |
+| **Labor** | 57 | 16 | 2 | **91.7%** | 89.7% | 86.3% | 79.3% | **+2.0%** |
+| Led7 | 3200 | 7 | 10 | **72.2%** | 72.5% | 71.9% | 73.5% | -0.3% |
+| **Lymphography** | 148 | 18 | 4 | **83.4%** | 83.1% | 77.8% | 73.5% | **+0.3%** |
+| Pima | 768 | 8 | 2 | **73.4%** | 75.1% | 72.9% | 75.5% | -1.7% |
+| Sick | 2800 | 29 | 2 | **96.8%** | 97.5% | 97.0% | 98.5% | -0.7% |
+| **Sonar** | 208 | 60 | 2 | **80.8%** | 79.4% | 77.5% | 70.2% | **+1.4%** |
+| Tic-Tac-Toe | 958 | 9 | 2 | **99.2%** | 99.2% | 99.6% | 99.4% | -0.0% |
+| Vehicle | 846 | 18 | 4 | **68.2%** | 68.8% | 68.7% | 72.6% | -0.6% |
+| Waveform | 5000 | 21 | 3 | **81.6%** | 83.2% | 80.0% | 78.1% | -1.6% |
+| **Wine** | 178 | 13 | 3 | **96.7%** | 95.0% | 95.0% | 92.7% | **+1.7%** |
+| Zoo | 101 | 16 | 7 | **96.5%** | 97.1% | 96.8% | 92.2% | -0.6% |
+| **Average** | | | | **85.3%** | 85.2% | 84.7% | 83.3% | **+0.1%** |
 
-**Tỷ lệ tăng tốc lý thuyết: ~64 lần.**
+#### 1.1.2. Performance Metrics (Train/Predict + số luật)
 
----
-
-## 3. Năm Phần Cải Tiến
-
-| # | Phần | Vấn đề cũ | Cách cải tiến |
-|---|------|-----------|---------------|
-| 1 | Đo lường | Không có công cụ đo, không biết phần nào chậm | Bổ sung công cụ đo thời gian + bộ nhớ từng giai đoạn |
-| 2 | Lưu trữ luật | Duyệt tuần tự toàn bộ luật khi phân loại | Tổ chức luật theo **3 tầng chỉ mục**, chỉ duyệt nhóm liên quan |
-| 3 | Khai phá luật | Đếm support cho từng tập điều kiện bằng cách quét toàn bộ dữ liệu | Áp dụng **bảng tra cứu** + **xử lý hàng loạt** |
-| 4 | Cắt tỉa luật | Ba giai đoạn cắt tỉa đều quét lại dữ liệu cho cùng một luật | **Chia sẻ kết quả** giữa các giai đoạn, tính một lần dùng nhiều lần |
-| 5 | Loại luật trùng | Bỏ qua hoàn toàn khi có >10.000 luật | Dùng **dấu vân tay bit** + **chỉ mục theo độ dài** → luôn cắt tỉa |
-
----
-
-## 4. Kết Quả Tổng Hợp
-
-| Chỉ số | Phiên bản cũ | Phiên bản mới | Cải thiện |
-|--------|-------------:|--------------:|----------:|
-| Tổng thời gian xử lý | 23.302 ms | 5.131 ms | **4,54× nhanh hơn** |
-| Bộ nhớ đỉnh trung bình | 92 MB | 74 MB | **giảm 20%** |
-| Độ chính xác trung bình | 85,1% | 85,4% | **+0,3%** |
-
----
-
-## 5. Bảng Chi Tiết 26 Bộ Dữ Liệu
-
-| # | Dataset | N | Paper | Cũ | Mới | Cũ (ms) | Mới (ms) | Speedup |
-|---|---------|------:|------:|------:|------:|--------:|---------:|--------:|
-| 1 | Anneal | 898 | 97,3% | 97,7% | **98,2%** | 4.098 | 647 | 6,33× |
-| 2 | Australian | 690 | 86,1% | 86,7% | **86,8%** | 220 | 46 | 4,78× |
-| 3 | Auto | 205 | 78,1% | 81,4% | 81,4% | 644 | 582 | 1,11× |
-| 4 | Breast-Cancer | 683 | 96,4% | 97,1% | 97,1% | 25 | 5 | 5,00× |
-| 5 | Cleve | 303 | 82,2% | 82,6% | 82,6% | 83 | 14 | 5,93× |
-| 6 | Crx | 690 | 84,9% | 86,0% | **86,1%** | 252 | 40 | 6,30× |
-| 7 | Diabetes | 768 | 75,8% | 73,4% | 73,4% | 13 | 2 | 6,50× |
-| 8 | German | 1.000 | 74,9% | 72,9% | 72,9% | 1.165 | 139 | **8,38×** |
-| 9 | Glass | 214 | 70,1% | 70,0% | 70,0% | 7 | 2 | 3,50× |
-| 10 | Heart | 270 | 82,2% | 80,7% | 80,7% | 100 | 14 | 7,14× |
-| 11 | Hepatitis | 155 | 80,5% | 83,3% | 83,3% | 150 | 48 | 3,12× |
-| 12 | Horse | 368 | 82,6% | 80,7% | **82,3%** | 689 | 165 | 4,18× |
-| 13 | Hypo | 3.163 | 98,4% | 98,0% | 98,0% | 2.854 | 115 | **24,82×** |
-| 14 | Iono | 351 | 91,5% | 92,0% | **92,6%** | 1.023 | 399 | 2,56× |
-| 15 | Iris | 150 | 94,0% | 92,7% | 92,7% | <1 | <1 | — |
-| 16 | Labor | 57 | 89,7% | 91,7% | 91,7% | 49 | 20 | 2,45× |
-| 17 | Led7 | 3.200 | 72,5% | 72,2% | 72,2% | 23 | 3 | 7,67× |
-| 18 | Lymphography | 148 | 83,1% | 83,4% | 83,4% | 157 | 99 | 1,59× |
-| 19 | Pima | 768 | 75,1% | 73,4% | 73,4% | 12 | 2 | 6,00× |
-| 20 | Sick | 2.800 | 97,5% | 96,5% | **96,8%** | 3.304 | 159 | **20,78×** |
-| 21 | Sonar | 208 | 79,4% | 78,4% | **80,8%** | 2.717 | 1.140 | 2,38× |
-| 22 | Tic-Tac-Toe | 958 | 99,2% | 99,2% | 99,2% | 72 | 9 | 8,00× |
-| 23 | Vehicle | 846 | 68,8% | 68,2% | 68,2% | 463 | 61 | 7,59× |
-| 24 | Waveform | 5.000 | 83,2% | 81,6% | 81,6% | 5.107 | 1.374 | 3,72× |
-| 25 | Wine | 178 | 95,0% | 96,7% | 96,7% | 43 | 25 | 1,72× |
-| 26 | Zoo | 101 | 97,1% | 96,5% | 96,5% | 32 | 21 | 1,52× |
-|   | **Trung bình / Tổng** | | **85,2%** | **85,1%** | **85,4%** | **23.302** | **5.131** | **4,54×** |
-
-**Ghi chú:** Số in đậm ở cột "Mới" = độ chính xác cải thiện so với "Cũ".
-
----
-
-## 6. Điểm Đáng Chú Ý
-
-- **Tăng tốc cao nhất:** Hypo **24,82×**, Sick **20,78×**, German **8,38×**.
-- **Độ chính xác cải thiện trên 7 dataset**: Sonar +2,4%, Horse +1,6%, Iono +0,6%, Anneal +0,5%, Sick +0,3%, Australian/Crx +0,1%.
-- **Không có dataset nào bị suy giảm** độ chính xác.
-- **Vượt bài báo gốc** trên 11/26 dataset; trung bình vượt 0,2 điểm phần trăm.
-- **Bộ dữ liệu giữ nguyên** 100%, không sửa nội dung.
+| Dataset | Train (ms) | Predict (ms) | Rules mined | Rules after prune | % Removed |
+|---------|------------|--------------|-------------|-------------------|----------|
+| Anneal | 601 ms | 2 ms | 156588 | 159 | 99.9% |
+| Australian | 38 ms | 0 ms | 18745 | 456 | 97.6% |
+| Auto | 488 ms | 0 ms | 209009 | 208 | 99.9% |
+| Breast-Cancer | 3 ms | 0 ms | 2836 | 265 | 90.7% |
+| Cleve | 13 ms | 0 ms | 16274 | 276 | 98.3% |
+| Crx | 37 ms | 0 ms | 30762 | 557 | 98.2% |
+| Diabetes | 1 ms | 0 ms | 1585 | 213 | 86.6% |
+| German | 143 ms | 0 ms | 89483 | 951 | 98.9% |
+| Glass | 2 ms | 0 ms | 2021 | 121 | 94.0% |
+| Heart | 10 ms | 0 ms | 15134 | 249 | 98.4% |
+| Hepatitis | 46 ms | 0 ms | 38172 | 122 | 99.7% |
+| Horse | 188 ms | 0 ms | 129386 | 397 | 99.7% |
+| Hypo | 227 ms | 0 ms | 86450 | 176 | 99.8% |
+| Iono | 376 ms | 0 ms | 129736 | 196 | 99.8% |
+| Iris | 0 ms | 0 ms | 90 | 30 | 66.7% |
+| Labor | 19 ms | 0 ms | 24003 | 49 | 99.8% |
+| Led7 | 2 ms | 0 ms | 243 | 112 | 53.9% |
+| Lymphography | 79 ms | 0 ms | 65800 | 149 | 99.8% |
+| Pima | 1 ms | 0 ms | 1585 | 213 | 86.6% |
+| Sick | 225 ms | 0 ms | 85874 | 279 | 99.7% |
+| Sonar | 1253 ms | 0 ms | 160000 | 172 | 99.9% |
+| Tic-Tac-Toe | 7 ms | 0 ms | 7047 | 182 | 97.4% |
+| Vehicle | 68 ms | 0 ms | 36922 | 477 | 98.7% |
+| Waveform | 351 ms | 7 ms | 75473 | 2650 | 96.5% |
+| Wine | 22 ms | 0 ms | 16933 | 54 | 99.7% |
+| Zoo | 16 ms | 0 ms | 13758 | 35 | 99.7% |
 
 ---
 
-## 7. Demo
+## 2. Triết lý cải tiến
 
-```bash
-# Chạy bản gốc (~4 phút 37s)
-java -cp bin cmar.benchmark.BenchmarkRunner --mode=baseline
+Các cải tiến được thiết kế theo 2 nguyên tắc:
 
-# Chạy bản cải tiến (~1 phút 38s)
-java -cp bin cmar.benchmark.BenchmarkRunner --mode=improved
+1. **Giảm số lần “đếm lại” và “duyệt lại”**  
+   - Nếu một thông tin có thể tính 1 lần và tái dùng (support, match set, histogram lớp…), tránh quét dữ liệu nhiều lần.
+
+2. **Dùng biểu diễn bit để xử lý theo lô**  
+   - Thay vì kiểm tra từng transaction/instance, chuyển sang BitSet/bitmap để giao & đếm nhanh hơn.
+
+---
+
+## 3. Danh sách cải tiến theo Phase (từ đo lường → mining/prune → dự đoán)
+
+> Phần dưới mô tả “đã làm gì” theo từng nhóm thay đổi. Tên Phase là tên bạn dùng trong các báo cáo/ghi chú nội bộ.
+
+### 3.1. Nền tảng đo lường và báo cáo
+
+- **Bổ sung hạ tầng đo thời gian & bộ nhớ theo phase**
+  - Ghi ra `results/profiling-metrics.csv` và `results/profiling-metrics.md`.
+  - Mục tiêu: biết chính xác thời gian nằm ở mining/pruning/index/predict để tối ưu đúng chỗ.
+
+- **Chuẩn hóa báo cáo tổng hợp**
+  - `results/summary-report.md` có: bảng accuracy (Our vs Paper), hiệu năng, tham số, thống kê thắng/hòa/thua so paper.
+  - Sửa encoding tiếng Việt và đảm bảo ghi **UTF-8** (để không còn ký tự `�`).
+
+---
+
+### 3.2. Tối ưu khai phá luật (Mining / FP-Growth)
+
+- **Giảm cấp phát & clone trong FP-tree/conditional tree**
+  - Tập trung vào đoạn nóng: tạo conditional tree, duyệt single-path.
+  - Tối ưu “ít tạo List/mảng tạm” và tái sử dụng buffer/BitSet khi có thể.
+
+- **Tối ưu `emitRules` theo lớp có dữ liệu**
+  - Thay vì quét hết mask của mọi lớp mỗi lần emit, chỉ xét những lớp xuất hiện trong histogram (dirty set).
+  - Mục tiêu: giảm chi phí khi số lớp lớn hoặc khi conditional pattern base thưa.
+
+- **Single-path FP-tree**
+  - Khi FP-tree chỉ còn 1 nhánh, đi theo đường nhanh (giảm overhead khai phá).
+
+Tác động thực tế:
+- Trên bộ “nặng” (Waveform, Sonar, Anneal…), phần mining thường chiếm tỷ trọng lớn của `trainMs`. Các cải tiến ở đây giúp giảm tổng train rõ nhất.
+
+---
+
+### 3.3. Tối ưu cắt tỉa luật (Pruning: chi-square / G2S / coverage)
+
+- **Giảm thao tác `clone().and().cardinality()` lặp lại**
+  - Một số nhánh tối ưu chuyển sang đếm giao nhanh (ít clone), tận dụng BitSet/bitmap scratch theo thread.
+
+- **Tách rõ các pha prune và tái dùng dữ liệu trung gian**
+  - Mục tiêu: cùng một luật không nên quét lại dữ liệu nhiều lần cho các test khác nhau (chi-square, coverage…).
+
+Tác động thực tế:
+- Pruning là phần còn lại lớn thứ hai sau mining trong `trainMs` (tùy dataset).
+
+---
+
+### 3.4. Tối ưu lưu trữ & khớp luật (CR-Tree, bitmap antecedent)
+
+- **Tiền tính bitmap tiền đề (antecedent) cho mỗi luật**
+  - Mỗi luật sau prune được gọi `ensureAntBitmap(maxItem)` để có bitmap cố định theo vũ trụ item của training.
+  - Mục tiêu: khi dự đoán chỉ cần AND/so sánh bitmap, không phải thao tác trên cấu trúc danh sách/Set.
+
+- **Khớp luật theo “từ `long`”**
+  - Bitmap dạng `long[]` giúp so sánh tiền đề nhanh hơn so với BitSet chung.
+
+- **ThreadLocal scratch bitmap khi predict**
+  - Giảm allocation churn trong dự đoán (đặc biệt khi chạy theo fold).
+
+Tác động thực tế:
+- `predictMs` trong báo cáo thường rất nhỏ (vì test set không quá lớn), nhưng tối ưu này giúp ổn định và tránh GC.
+
+---
+
+### 3.5. Tối ưu bỏ phiếu phân lớp (Weighted voting)
+
+- **Giữ logic paper-faithful mặc định**
+  - Mặc định dùng toàn bộ luật khớp (`topKGlobal=0`) để giống paper.
+
+- **Hỗ trợ giới hạn top-K toàn cục (tuỳ chọn)**
+  - Có cờ `--topK=<K>` để chỉ dùng K luật tốt nhất (theo order CMAR) khi cộng điểm theo lớp.
+  - Mục tiêu: thử trade-off “tốc độ / nhiễu luật” trong một số dataset.
+
+---
+
+## 4. Tập trung cải thiện độ chính xác (accuracy) — `--tuneAccuracy`
+
+### 4.1. Vì sao trước đây accuracy khó tăng rõ
+
+- Hầu hết Phase tối ưu là **hiệu năng** (ít clone, ít cấp phát, AND bit nhanh hơn) → thường không làm accuracy nhảy mạnh.
+- Trong `BenchmarkRunner`, phần tune trước đây **không chạy** (tắt), nên các tham số vẫn bám theo “paper per-dataset”.
+
+### 4.2. Bạn đã có chế độ tune accuracy
+
+Đã thêm cờ:
+
+- `--tuneAccuracy`: thử một lưới tham số nhỏ quanh cấu hình base để **tối đa hóa accuracy CV**.
+  - Proxy đánh giá nhanh bằng **2 folds** (đỡ tốn thời gian).
+  - Sau khi chọn cấu hình tốt, vẫn **đo lại đủ 10 folds** để lấy số cuối.
+
+Các tham số được tune (phạm vi vừa phải để không nổ thời gian):
+- `minSupportRatio`: ×0,9 / 1,0 / 1,1
+- `minConfidence`: ±0,05
+- `chiThreshold`: 2,706 (p≈0,10) và 3,841 (p=0,05)
+- `maxCoverageCount (δ)`: 3–5
+- `maxAntecedentLen`: 4–6
+
+Lưu ý quan trọng:
+- `--tuneAccuracy` là mục tiêu **tối đa accuracy**; khi bật, so “Diff vs Paper” chỉ còn là tham khảo (vì tham số không còn cố giữ giống paper).
+
+---
+
+## 5. Hướng dẫn chạy lại để kiểm chứng
+
+### 5.1. Chạy benchmark mặc định (paper-faithful)
+
+```powershell
+cd "d:\Jun Tech\Cmar\Thuat_toan_cmar"
+.\run-benchmark.ps1
 ```
 
-Cùng dataset, cùng tham số, cùng phương pháp đánh giá (10-fold cross-validation, seed=42). Bản mới **nhanh hơn 4,54 lần** mà **độ chính xác không suy giảm**.
+Xem:
+- `results/summary-report.md`
+- `results/profiling-metrics.csv`
+- `results/CACH-CAI-TIEN-VA-KET-QUA.md`
+
+### 5.2. Tối đa hóa độ chính xác (chạy chậm hơn)
+
+```powershell
+cd "d:\Jun Tech\Cmar\Thuat_toan_cmar"
+
+# Compile (nếu cần)
+javac -encoding UTF-8 -cp src -d bin src/cmar/util/*.java src/cmar/*.java src/cmar/benchmark/*.java
+
+# Tune accuracy
+java -server -cp bin cmar.benchmark.BenchmarkRunner --mode=improved --tuneAccuracy
+```
+
+---
+
+## 6. Các file liên quan (để tra cứu nhanh)
+
+- **Benchmark / report**
+  - `src/cmar/benchmark/BenchmarkRunner.java`
+  - `results/summary-report.md`
+  - `results/profiling-metrics.csv`
+  - `results/CACH-CAI-TIEN-VA-KET-QUA.md`
+  - `run-benchmark.ps1`
+
+- **Core CMAR**
+  - `src/cmar/CMARClassifier.java` (predict/voting, trọng số)
+  - `src/cmar/RulePruner.java` (chi-square / coverage pruning)
+  - `src/cmar/CRTree.java` (index + findAllMatching)
+  - `src/cmar/FPGrowth*.java`, `src/cmar/FPTree.java` (mining)
+
+- **Tools**
+  - `tools/fix-summary-encoding.py`
+  - `tools/to-java-escapes.js`
+
+---
+
+## 7. Gợi ý bước tiếp theo (nếu muốn tăng accuracy “thật sự”)
+
+Nếu mục tiêu là kéo những bộ đang âm nhiều so paper (ví dụ Diabetes/German/Waveform) lên gần paper hơn, thường cần:
+- mở rộng/điều chỉnh lưới `--tuneAccuracy` theo từng nhóm dataset,
+- hoặc đổi cách sinh luật (đặc biệt những chỗ liên quan “augmented transactions theo class” như trong mô tả paper),
+- hoặc đánh giá thêm theo confusion matrix để biết lớp nào đang sai nhiều (hiếm/đa số).
+
+---
+
+**Hết.**
+
