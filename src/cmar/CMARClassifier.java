@@ -19,6 +19,20 @@ public class CMARClassifier {
     private int maxAntecedentLength;
     // Top-k global matched rules voting. 0 = use all matched rules (paper-faithful).
     private int topKGlobal;
+    // Hybrid: when true, use HM as voting weight (but keep CMAR sort for pruning).
+    public static boolean useHMWeightOnly = false;
+    // Alternative: use Lift as voting weight (WEviRC-inspired).
+    // Lift>1 = positive correlation; stronger correlation → larger vote.
+    public static boolean useLiftWeight = false;
+    // Composite weight = χ² × Lift  (statistical significance × correlation strength)
+    public static boolean useChiLiftWeight = false;
+    // Composite weight = confidence × Lift  (predictive accuracy × correlation)
+    public static boolean useConfLiftWeight = false;
+    // CPAR-style: average weights per class (instead of sum) — fair across class sizes.
+    public static boolean useAvgVote = false;
+    // CPAR-style: take top-k of EACH class's matched rules (instead of global top-k).
+    // 0 = disabled (use topKGlobal).
+    public static int perClassTopK = 0;
 
     private CRTree crTree;
     private int defaultClass;
@@ -77,6 +91,9 @@ public class CMARClassifier {
         for (int label : labels) classCounts.merge(label, 1, Integer::sum);
         defaultClass = classCounts.entrySet().stream()
                 .max(Map.Entry.comparingByValue()).get().getKey();
+        // Share class frequencies for dominant-class sort tie-breaker
+        Rule.CLASS_FREQS = classCounts;
+        Rule.TOTAL_N = transactions.length;
 
         // Phase 1: Mine rules using FP-Growth (paper Section 2)
         // Phase 06 IMPROVED: class-aware mining (drop useless itemsets early)
@@ -107,9 +124,23 @@ public class CMARClassifier {
         }
 
         // Paper Section 4: weight = chi²/max_chi² (normalized)
+        // Hybrid: in HM modes weight = HM (WCBA-style F1 voting).
         int N = transactions.length;
         for (Rule rule : prunedRules) {
-            rule.weight = computeNormalizedChiSquare(rule, N, classCounts);
+            if (useChiLiftWeight) {
+                // χ² × Lift — combine statistical significance and correlation magnitude
+                double chiNorm = computeNormalizedChiSquare(rule, N, classCounts);
+                rule.weight = chiNorm * rule.lift;
+            } else if (useConfLiftWeight) {
+                // confidence × Lift — combine predictive accuracy with correlation strength
+                rule.weight = rule.confidence * rule.lift;
+            } else if (useLiftWeight) {
+                rule.weight = rule.lift;
+            } else if (Rule.useHMLift || useHMWeightOnly) {
+                rule.weight = rule.hm;
+            } else {
+                rule.weight = computeNormalizedChiSquare(rule, N, classCounts);
+            }
         }
 
         // Phase 3: Index in CR-tree
@@ -141,11 +172,13 @@ public class CMARClassifier {
         // Sort by CMAR ordering: conf desc, sup desc, len asc
         Collections.sort(allMatched);
 
-        // Step 1: If highest-confidence rules all predict the same class, use it
-        double bestConf = allMatched.get(0).confidence;
+        // Step 1: If highest-priority rules all predict the same class, use it.
+        // Priority = HM in hybrid mode, confidence in CMAR-standard mode.
+        double bestPrio = Rule.useHMLift ? allMatched.get(0).hm : allMatched.get(0).confidence;
         int unanimousClass = allMatched.get(0).classLabel;
         for (Rule r : allMatched) {
-            if (r.confidence < bestConf - 1e-9) break;
+            double prio = Rule.useHMLift ? r.hm : r.confidence;
+            if (prio < bestPrio - 1e-9) break;
             if (r.classLabel != unanimousClass) {
                 unanimousClass = Integer.MIN_VALUE;
                 break;
@@ -155,13 +188,37 @@ public class CMARClassifier {
             return unanimousClass;
         }
 
-        // Step 2: Weighted chi-square group voting (paper Section 4)
+        // Step 2: Weighted group voting (paper Section 4 + CPAR-style extensions)
         Map<Integer, Double> classScores = new HashMap<>();
-        int limit = allMatched.size();
-        if (topKGlobal > 0) limit = Math.min(limit, topKGlobal);
-        for (int i = 0; i < limit; i++) {
-            Rule r = allMatched.get(i);
-            classScores.merge(r.classLabel, r.weight, Double::sum);
+        Map<Integer, Integer> classCounts = new HashMap<>();
+
+        if (perClassTopK > 0) {
+            // CPAR-style: keep top-k rules per class, then sum/avg those
+            Map<Integer, Integer> perClassSeen = new HashMap<>();
+            for (Rule r : allMatched) {
+                int seen = perClassSeen.getOrDefault(r.classLabel, 0);
+                if (seen >= perClassTopK) continue;
+                classScores.merge(r.classLabel, r.weight, Double::sum);
+                classCounts.merge(r.classLabel, 1, Integer::sum);
+                perClassSeen.put(r.classLabel, seen + 1);
+            }
+        } else {
+            int limit = allMatched.size();
+            if (topKGlobal > 0) limit = Math.min(limit, topKGlobal);
+            for (int i = 0; i < limit; i++) {
+                Rule r = allMatched.get(i);
+                classScores.merge(r.classLabel, r.weight, Double::sum);
+                classCounts.merge(r.classLabel, 1, Integer::sum);
+            }
+        }
+        if (useAvgVote) {
+            for (Map.Entry<Integer, Integer> e : classCounts.entrySet()) {
+                int cnt = e.getValue();
+                if (cnt > 0) {
+                    Double sum = classScores.get(e.getKey());
+                    if (sum != null) classScores.put(e.getKey(), sum / cnt);
+                }
+            }
         }
 
         int bestClass = defaultClass;

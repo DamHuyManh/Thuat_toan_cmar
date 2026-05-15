@@ -48,7 +48,7 @@
 ### Performance
 | Metric | Value |
 |---|---|
-| Avg Training Time | 37 ms |
+| Avg Training Time | 119 ms |
 | Avg Prediction Time | 0 ms |
 | Avg Rules Mined | 30762 |
 | Avg Rules After Pruning | 557 |

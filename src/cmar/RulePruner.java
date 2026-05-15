@@ -15,6 +15,19 @@ public class RulePruner {
     private double chiSquareThreshold;
     private int maxCoverageCount; // delta in paper (default 3)
     private double minConfidence;
+    // Hybrid HM+Lift mode (WCBA + WEviRC): when true, filter by Lift>=1.0 and HM>=minHM.
+    public static boolean useHMLift = false;
+    public static double minLift = 1.0;
+    public static double minHM = 0.005; // tuned for relSupp-based HM (sup/N)
+    // New: stricter Lift filter applied IN ADDITION to chi² (only when > 0). 0 = disabled.
+    public static double strictLift = 0.0;
+    // P2: Stratified coverage — protect top-N rules per class before normal DCP.
+    // 0 = disabled. Recommended: 3-10.
+    public static int stratifiedTopN = 0;
+    // P3: Dual-criterion filter — keep rule if χ² OK OR (Lift≥minLift AND conf≥minConfDual).
+    public static boolean useDualFilter = false;
+    public static double dualMinLift = 1.5;
+    public static double dualMinConf = 0.7;
 
     /** Phase 11: scratch AND cho chi²; lưu N tối thiểu vì BitSet.clear() làm length() = 0. */
     private static final class ChiScratchHolder {
@@ -85,14 +98,31 @@ public class RulePruner {
             rule.antecedentSupport = antSupport;
             rule.confidence = (double) exactSupport / antSupport;
 
-            if (rule.confidence < minConfidence) continue;
-
             int clsSupport = classSupports.getOrDefault(rule.classLabel, 0);
+            // Compute HM (F1) + Lift in all modes — needed for ranking/voting if enabled.
+            // WCBA-style: WeightSupport = relative support = exactSupport / N (scale-matched to conf).
+            double wSupp = N > 0 ? (double) exactSupport / N : 0.0;
+            double sumPR = wSupp + rule.confidence;
+            rule.hm = sumPR > 0 ? 2.0 * wSupp * rule.confidence / sumPR : 0.0;
+            rule.lift = (antSupport > 0 && clsSupport > 0)
+                    ? ((double) exactSupport * N) / ((double) antSupport * clsSupport) : 0.0;
+
+            if (useHMLift) {
+                // WCBA + WEviRC filter: skip conf-only threshold; demand positive correlation and balance
+                if (rule.lift < minLift) continue;
+                if (rule.hm < minHM) continue;
+            } else {
+                if (rule.confidence < minConfidence) continue;
+            }
+
             double chi2 = computeChiSquare(exactSupport, antSupport, clsSupport, N);
             rule.chiSquare = chi2;
 
             double priorProb = (double) clsSupport / N;
-            if (chi2 >= chiSquareThreshold && rule.confidence > priorProb) {
+            boolean chiOK = chi2 >= chiSquareThreshold && rule.confidence > priorProb;
+            boolean dualOK = useDualFilter && rule.lift >= dualMinLift && rule.confidence >= dualMinConf;
+            if (chiOK || dualOK) {
+                if (strictLift > 0.0 && rule.lift < strictLift) continue;
                 pruned.add(rule);
             }
         }
@@ -215,8 +245,33 @@ public class RulePruner {
         notFullyCovered.set(0, N);
 
         List<Rule> selected = new ArrayList<>();
+        Map<Integer, Integer> perClassKept = new HashMap<>();
+
+        // P2: Stratified pass — protect top-N rules per class before normal DCP
+        if (stratifiedTopN > 0) {
+            Set<Rule> reserved = new HashSet<>();
+            for (Rule rule : rules) {
+                int kept = perClassKept.getOrDefault(rule.classLabel, 0);
+                if (kept < stratifiedTopN) {
+                    BitSet match = ruleMatches.get(rule);
+                    if (match == null) continue;
+                    selected.add(rule);
+                    reserved.add(rule);
+                    perClassKept.put(rule.classLabel, kept + 1);
+                    // Update coverage from these reserved rules
+                    for (int i = match.nextSetBit(0); i >= 0; i = match.nextSetBit(i + 1)) {
+                        if (!notFullyCovered.get(i)) continue;
+                        coverCount[i]++;
+                        if (coverCount[i] >= maxCoverageCount) {
+                            notFullyCovered.clear(i);
+                        }
+                    }
+                }
+            }
+        }
 
         for (Rule rule : rules) {
+            if (selected.contains(rule)) continue;  // already reserved by stratified pass
             if (notFullyCovered.isEmpty()) break;
 
             BitSet match = ruleMatches.get(rule);
@@ -543,9 +598,21 @@ public class RulePruner {
             rule.support = exactSupport;
             rule.antecedentSupport = antSupport;
             rule.confidence = (double) exactSupport / antSupport;
-            if (rule.confidence < minConfidence) continue;
 
             int clsSupport = classSupports.getOrDefault(rule.classLabel, 0);
+            double wSupp = clsSupport > 0 ? (double) exactSupport / clsSupport : 0.0;
+            double sumPR = wSupp + rule.confidence;
+            rule.hm = sumPR > 0 ? 2.0 * wSupp * rule.confidence / sumPR : 0.0;
+            rule.lift = (antSupport > 0 && clsSupport > 0)
+                    ? ((double) exactSupport * N) / ((double) antSupport * clsSupport) : 0.0;
+
+            if (useHMLift) {
+                if (rule.lift < minLift) continue;
+                if (rule.hm < minHM) continue;
+            } else {
+                if (rule.confidence < minConfidence) continue;
+            }
+
             double chi2 = computeChiSquare(exactSupport, antSupport, clsSupport, N);
             rule.chiSquare = chi2;
 

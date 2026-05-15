@@ -17,9 +17,13 @@ public class BenchmarkRunner {
     static final String RESULTS_DIR = "results";
     static final double TUNE_TRIGGER_DIFF = 2.0; // tune when gap vs paper is larger than 2%
     static final int TUNE_FOLDS = 2; // fast tuning with 2 folds
-    static int TOP_K_GLOBAL = 0; // 0 = paper-faithful (use all matched rules)
+    static int TOP_K_GLOBAL = 3; // 0 = paper-faithful (use all matched rules); >0 = top-k voting
     /** Khi true: lưới tham số quanh giá trị paper để tối đa hóa accuracy CV (khác so sánh 1–1 paper). */
     static boolean TUNE_MAX_ACCURACY = false;
+    /** Khi true: ghi ra results/rules/&lt;dataset&gt;-rules.csv cho mỗi bộ (luật từ fold cuối). */
+    static boolean DUMP_RULES = false;
+    /** Override chi² threshold from CLI; 0.0 = use paper default 3.841. */
+    static double CHI_OVERRIDE = 0.0;
 
     public static void main(String[] args) throws IOException {
         // Phase 05: parse --mode=baseline|improved (default=improved)
@@ -33,17 +37,151 @@ public class BenchmarkRunner {
                 try { TOP_K_GLOBAL = Math.max(0, Integer.parseInt(arg.substring(7))); }
                 catch (NumberFormatException ignored) {}
             }
+            if (arg.equalsIgnoreCase("--hmLift")) {
+                // Full hybrid: HM sort + Lift filter + HM voting weight
+                cmar.Rule.useHMLift = true;
+                cmar.RulePruner.useHMLift = true;
+            }
+            if (arg.equalsIgnoreCase("--liftOnly")) {
+                // WEviRC-style: only add Lift>=1 filter (CMAR sort + chi² vote unchanged)
+                cmar.RulePruner.useHMLift = true;   // enables filter
+                cmar.RulePruner.minHM = 0.0;         // disable HM filter
+                cmar.Rule.useHMLift = false;         // keep CMAR sort + chi² vote
+            }
+            if (arg.equalsIgnoreCase("--hmWeightOnly")) {
+                // WCBA-light: keep CMAR pruning order intact, only swap voting weight to HM.
+                cmar.CMARClassifier.useHMWeightOnly = true;
+                cmar.Rule.useHMLift = false;
+                cmar.RulePruner.useHMLift = false;
+            }
+            if (arg.equalsIgnoreCase("--dumpRules")) DUMP_RULES = true;
+            if (arg.equalsIgnoreCase("--liftSort")) {
+                // Sort rules by Lift DESC first. CMAR-replacement direction: "larger Lift first".
+                cmar.Rule.useLiftSort = true;
+                cmar.Rule.useHMLift = false;
+            }
+            if (arg.equalsIgnoreCase("--longerRules")) cmar.Rule.useLongerRules = true;
+            if (arg.equalsIgnoreCase("--liftSort")) cmar.Rule.useLiftSort = true;
+            if (arg.equalsIgnoreCase("--avgVote")) cmar.CMARClassifier.useAvgVote = true;
+            if (arg.startsWith("--perClassTopK=")) {
+                try { cmar.CMARClassifier.perClassTopK = Math.max(0, Integer.parseInt(arg.substring(15))); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (arg.equalsIgnoreCase("--liftWeight")) {
+                // Lift-based voting: weight = Lift (positive correlation magnitude).
+                cmar.CMARClassifier.useLiftWeight = true;
+                cmar.Rule.useHMLift = false;
+                cmar.RulePruner.useHMLift = false;
+            }
+            if (arg.startsWith("--minHM=")) {
+                try { cmar.RulePruner.minHM = Double.parseDouble(arg.substring(8)); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (arg.startsWith("--minLift=")) {
+                try { cmar.RulePruner.minLift = Double.parseDouble(arg.substring(10)); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (arg.equalsIgnoreCase("--strictChi")) {
+                // Stricter chi² threshold p=0.01 (instead of p=0.05).
+                CHI_OVERRIDE = 6.635;
+            }
+            if (arg.startsWith("--chiThreshold=")) {
+                try { CHI_OVERRIDE = Double.parseDouble(arg.substring(15)); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (arg.equalsIgnoreCase("--liftTieBreak")) {
+                // Lift as 3rd-criterion tiebreaker in CMAR sort (keeps paper primary order).
+                cmar.Rule.useLiftTieBreak = true;
+            }
+            if (arg.equalsIgnoreCase("--liftSecond")) {
+                // Lift in position 2: conf DESC → Lift DESC → sup DESC → length ASC
+                cmar.Rule.useLiftSecond = true;
+            }
+            if (arg.equalsIgnoreCase("--chiFirst")) {
+                // Sort by chi² DESC → confidence DESC → length ASC
+                cmar.Rule.useChiFirst = true;
+            }
+            if (arg.equalsIgnoreCase("--sortCompose")) {
+                // Sort by (confidence × Lift) DESC → length ASC
+                cmar.Rule.useSortCompose = true;
+            }
+            if (arg.equalsIgnoreCase("--sortChiLift")) {
+                // Sort by (chi² × Lift) DESC → length ASC
+                cmar.Rule.useSortChiLift = true;
+            }
+            if (arg.equalsIgnoreCase("--confLinear")) {
+                // Sort by (confidence + 0.1 × Lift) DESC → length ASC
+                cmar.Rule.useConfLinear = true;
+            }
+            if (arg.startsWith("--confLinearAlpha=")) {
+                try { cmar.Rule.confLinearAlpha = Double.parseDouble(arg.substring(18)); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (arg.equalsIgnoreCase("--condLift")) {
+                // Conditional: if conf==1 use Lift, else use support
+                cmar.Rule.useCondLift = true;
+            }
+            if (arg.equalsIgnoreCase("--dominantClass")) {
+                // CMAR sort + class frequency tie-breaker (MCAR/EAC style)
+                cmar.Rule.useDominantClass = true;
+            }
+            // P1: Class-weighted sort
+            if (arg.equalsIgnoreCase("--classWeightedSort")) {
+                cmar.Rule.useClassWeightedSort = true;
+            }
+            // P2: Stratified coverage
+            if (arg.startsWith("--stratified=")) {
+                try { cmar.RulePruner.stratifiedTopN = Integer.parseInt(arg.substring(13)); }
+                catch (NumberFormatException ignored) {}
+            }
+            // P3: Dual-criterion filter
+            if (arg.equalsIgnoreCase("--dualFilter")) {
+                cmar.RulePruner.useDualFilter = true;
+            }
+            if (arg.startsWith("--dualMinLift=")) {
+                try { cmar.RulePruner.dualMinLift = Double.parseDouble(arg.substring(14)); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (arg.startsWith("--dualMinConf=")) {
+                try { cmar.RulePruner.dualMinConf = Double.parseDouble(arg.substring(14)); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (arg.startsWith("--strictLift=")) {
+                try { cmar.RulePruner.strictLift = Double.parseDouble(arg.substring(13)); }
+                catch (NumberFormatException ignored) {}
+            }
+            if (arg.equalsIgnoreCase("--weightChiLift")) {
+                // Composite: vote weight = χ² × Lift
+                cmar.CMARClassifier.useChiLiftWeight = true;
+                cmar.CMARClassifier.useLiftWeight = false;
+            }
+            if (arg.equalsIgnoreCase("--weightConfLift")) {
+                // Composite: vote weight = confidence × Lift
+                cmar.CMARClassifier.useConfLiftWeight = true;
+                cmar.CMARClassifier.useLiftWeight = false;
+            }
         }
         if (mode.equals("baseline")) {
             cmar.util.OptimizationProfile.setMode(cmar.util.OptimizationProfile.Mode.BASELINE);
             System.out.println("=== CMAR Benchmark — BASELINE (original algorithm) ===\n");
         } else {
             cmar.util.OptimizationProfile.setMode(cmar.util.OptimizationProfile.Mode.IMPROVED);
-            if (TOP_K_GLOBAL > 0) {
-                System.out.println("=== CMAR Benchmark — IMPROVED (topK=" + TOP_K_GLOBAL + ") ===\n");
-            } else {
-                System.out.println("=== CMAR Benchmark — IMPROVED (inverted index + BitSet AND) ===\n");
+            String tag = (TOP_K_GLOBAL > 0 ? "topK=" + TOP_K_GLOBAL : "all-rules");
+            if (cmar.Rule.useLiftSort) {
+                tag += ", Lift-sort (Larger-Lift-first)";
+            } else if (cmar.Rule.useHMLift) {
+                tag += ", HM+Lift hybrid (minHM=" + cmar.RulePruner.minHM
+                        + ", minLift=" + cmar.RulePruner.minLift + ")";
+            } else if (cmar.CMARClassifier.useHMWeightOnly) {
+                tag += ", HM voting weight only";
+            } else if (cmar.CMARClassifier.useLiftWeight) {
+                tag += ", Lift voting weight";
+            } else if (cmar.RulePruner.useHMLift) {
+                tag += ", Lift filter only";
             }
+            if (cmar.Rule.useLongerRules) tag += ", longer-rules";
+            if (cmar.Rule.useLiftSort) tag += ", Lift-sort";
+            System.out.println("=== CMAR Benchmark — IMPROVED (" + tag + ") ===\n");
             if (TUNE_MAX_ACCURACY) {
                 System.out.println("** --tuneAccuracy: tối đa hóa accuracy (lưới tham số / fold nhanh) **\n");
             }
@@ -85,6 +223,35 @@ public class BenchmarkRunner {
         writeProfilingCsv(results);
         writeProfilingReport(results);
         System.out.println("\nAll reports saved to " + RESULTS_DIR + "/");
+    }
+
+    /** Dump tất cả luật (đã prune) ra CSV: 1 dòng/luật, có Lift/HM/χ²/conf/sup. */
+    static void dumpRulesCsv(String datasetName, java.util.List<cmar.Rule> rules) throws IOException {
+        String dir = RESULTS_DIR + "/rules";
+        new File(dir).mkdirs();
+        String filename = dir + "/" + datasetName.toLowerCase().replaceAll("[^a-z0-9]+", "-") + "-rules.csv";
+
+        // Sort by Lift desc to make inspection easier (best-correlated rules first).
+        java.util.List<cmar.Rule> sorted = new ArrayList<>(rules);
+        sorted.sort((a, b) -> Double.compare(b.getLift(), a.getLift()));
+
+        try (FileWriter fw = new FileWriter(filename)) {
+            fw.write("rank,classLabel,length,support,antSupport,confidence,lift,hm,chiSquare,weight,antecedent\n");
+            int rank = 1;
+            for (cmar.Rule r : sorted) {
+                int[] ant = r.getAntecedent();
+                StringBuilder antStr = new StringBuilder();
+                for (int i = 0; i < ant.length; i++) {
+                    if (i > 0) antStr.append(' ');
+                    antStr.append(ant[i]);
+                }
+                fw.write(String.format(Locale.US,
+                        "%d,%d,%d,%d,%d,%.4f,%.4f,%.4f,%.2f,%.4f,%s%n",
+                        rank++, r.getClassLabel(), ant.length,
+                        r.getSupport(), r.getAntecedentSupport(), r.getConfidence(),
+                        r.getLift(), r.getHm(), r.getChiSquare(), r.getWeight(), antStr.toString()));
+            }
+        }
     }
 
     /** Phase 01 — emit CSV profiling (time per phase + peak memory). */
@@ -305,6 +472,12 @@ public class BenchmarkRunner {
             totalPredictTime += predictTime;
             totalRulesMined += cmar.getTotalRulesMined();
             totalRulesPruned += cmar.getTotalRulesAfterPrune();
+
+            // Dump rules from last fold for inspection (lift / HM / chi² per rule).
+            if (DUMP_RULES && f == actualFolds - 1) {
+                try { dumpRulesCsv(ds.name, cmar.getRules()); }
+                catch (Exception e) { System.out.println("    dump error: " + e.getMessage()); }
+            }
         }
 
         EvalResult result = new EvalResult();
@@ -686,7 +859,7 @@ public class BenchmarkRunner {
             double minSupRatio = ds.paperMinSupport;
             double minConf = ds.paperMinConfidence;
             int minSup = Math.max(2, (int)(minSupRatio * trainN));
-            double chi = 3.841;
+            double chi = (CHI_OVERRIDE > 0.0) ? CHI_OVERRIDE : 3.841;
             int coverage = 4; // delta=4 cho accuracy tốt hơn
             int antLen = 4;
             return new ParamConfig(minSupRatio, minSup, minConf, chi, coverage, 80000, antLen);
