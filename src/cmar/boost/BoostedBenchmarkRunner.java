@@ -79,6 +79,7 @@ public class BoostedBenchmarkRunner {
             if (a.startsWith("--topK=")) {
                 try { TOP_K = Math.max(0, Integer.parseInt(a.substring(7))); } catch (Exception ignored) {}
             }
+            if (a.equalsIgnoreCase("--deterministic")) cmar.FPGrowthOptimized.DETERMINISTIC = true;
             if (a.equalsIgnoreCase("--liftWeight")) cmar.CMARClassifier.useLiftWeight = true;
             if (a.equalsIgnoreCase("--weightConfLift")) cmar.CMARClassifier.useConfLiftWeight = true;
             if (a.equalsIgnoreCase("--weightChiLift")) cmar.CMARClassifier.useChiLiftWeight = true;

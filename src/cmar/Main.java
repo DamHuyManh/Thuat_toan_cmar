@@ -13,10 +13,9 @@ public class Main {
         System.out.println("║   CMAR - Optimized Java Edition      ║");
         System.out.println("╚══════════════════════════════════════╝\n");
 
-        // Run demos
+        // Correctness illustration on the standard fixed "weather" toy example.
+        // For real benchmarks on 26 UCI datasets, run cmar.boost.BoostedBenchmarkRunner.
         demoSmallDataset();
-        System.out.println();
-        demoBenchmark();
     }
 
     /**
@@ -75,65 +74,4 @@ public class Main {
         }
     }
 
-    /**
-     * Benchmark with synthetic data.
-     */
-    static void demoBenchmark() {
-        System.out.println("--- Benchmark: Synthetic Dataset ---");
-
-        int numTransactions = 5000;
-        int numItems = 50;
-        int numClasses = 5;
-        int itemsPerTransaction = 8;
-
-        Random rng = new Random(42);
-
-        // Generate synthetic data
-        int[][] transactions = new int[numTransactions][];
-        int[] labels = new int[numTransactions];
-
-        for (int i = 0; i < numTransactions; i++) {
-            Set<Integer> items = new HashSet<>();
-            int classLabel = rng.nextInt(numClasses);
-            labels[i] = classLabel;
-
-            // Add some class-correlated items
-            items.add(classLabel * 3);
-            items.add(classLabel * 3 + 1);
-
-            // Add random items
-            while (items.size() < itemsPerTransaction) {
-                items.add(rng.nextInt(numItems));
-            }
-
-            transactions[i] = items.stream().mapToInt(Integer::intValue).toArray();
-        }
-
-        // Split 80/20
-        int trainSize = (int) (numTransactions * 0.8);
-        int[][] trainData = Arrays.copyOf(transactions, trainSize);
-        int[] trainLabels = Arrays.copyOf(labels, trainSize);
-        int[][] testData = Arrays.copyOfRange(transactions, trainSize, numTransactions);
-        int[] testLabels = Arrays.copyOfRange(labels, trainSize, numTransactions);
-
-        // Train & evaluate
-        CMARClassifier cmar = new CMARClassifier(10, 0.4, 3.841, 4, 2000);
-
-        long startTrain = System.nanoTime();
-        cmar.fit(trainData, trainLabels);
-        long trainTime = (System.nanoTime() - startTrain) / 1_000_000;
-
-        long startPred = System.nanoTime();
-        double accuracy = cmar.score(testData, testLabels);
-        long predTime = (System.nanoTime() - startPred) / 1_000_000;
-
-        System.out.println("Dataset:            " + numTransactions + " transactions, "
-                + numItems + " items, " + numClasses + " classes");
-        System.out.println("Train/Test split:   " + trainSize + "/" + (numTransactions - trainSize));
-        cmar.printStats();
-        System.out.println("Test accuracy:      " + String.format("%.1f%%", accuracy * 100));
-        System.out.println("Training time:      " + trainTime + " ms");
-        System.out.println("Prediction time:    " + predTime + " ms ("
-                + String.format("%.3f", (double) predTime / testData.length) + " ms/instance)");
-    }
 }

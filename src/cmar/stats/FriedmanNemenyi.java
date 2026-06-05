@@ -31,9 +31,9 @@ public final class FriedmanNemenyi {
     };
 
     public static void main(String[] args) throws IOException {
-        // Use AC-family complete datasets (no NaN in C4.5, CBA, CMAR, CPAR, ECBA, Ours)
+        // Use AC-family complete datasets (no NaN in C4.5, CBA, CMAR, CPAR, Ours)
         List<ModernBaselines.Row> rows = ModernBaselines.acFamilyDatasets();
-        String[] methods = {"C4.5", "CBA", "CMAR", "CPAR", "ECBA-EX", "Ours"};
+        String[] methods = {"C4.5", "CBA", "CMAR", "CPAR", "Ours"};
         int N = rows.size(), k = methods.length;
 
         // Build accuracy matrix [N datasets × k methods]
@@ -44,8 +44,7 @@ public final class FriedmanNemenyi {
             acc[i][1] = r.cba;
             acc[i][2] = r.cmar;
             acc[i][3] = r.cpar;
-            acc[i][4] = r.ecba;
-            acc[i][5] = r.ours;
+            acc[i][4] = r.ours;
         }
 
         // Rank within each dataset (1 = best/highest acc, ties get average rank)
@@ -174,6 +173,15 @@ public final class FriedmanNemenyi {
      * For precise values use scipy.stats.f.ppf(0.95, df1, df2).
      */
     static double criticalF(int df1, int df2) {
+        if (df1 == 4) {
+            if (df2 >= 100) return 2.46;
+            if (df2 >= 60) return 2.53;
+            if (df2 >= 40) return 2.61;
+            if (df2 >= 30) return 2.69;
+            if (df2 >= 20) return 2.87;
+            if (df2 >= 15) return 3.06;
+            if (df2 >= 10) return 3.48;
+        }
         // Lookup table for common cases (df1=5, various df2)
         if (df1 == 5) {
             if (df2 >= 100) return 2.31;

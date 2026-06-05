@@ -46,6 +46,9 @@ public class FPGrowthOptimized {
     // For small datasets, sequential is faster.
     private static final int PARALLEL_MIN_TX = 200;
 
+    /** When true, force single-thread mining for byte-reproducible per-dataset results (paper run). */
+    public static volatile boolean DETERMINISTIC = false;
+
     public FPGrowthOptimized(int minSupport, double minConfidence,
                               int maxRulesPerClass, int maxAntecedentLength) {
         this.minSupport = minSupport;
@@ -88,7 +91,7 @@ public class FPGrowthOptimized {
         allMatch.set(0, N);
 
         List<Rule> output;
-        if (N >= PARALLEL_MIN_TX && !tree.isSinglePath() && tree.itemCounts.size() > 4) {
+        if (!DETERMINISTIC && N >= PARALLEL_MIN_TX && !tree.isSinglePath() && tree.itemCounts.size() > 4) {
             output = mineRecursiveParallel(tree, new int[0], allMatch);
         } else {
             output = new ArrayList<>();

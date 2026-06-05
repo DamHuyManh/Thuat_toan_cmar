@@ -4,8 +4,8 @@ import java.util.*;
 
 /**
  * UCI Datasets used in the original CMAR paper (Li, Han, Pei 2001).
- * Downloads real data from UCI ML Repository when possible.
- * Falls back to high-fidelity synthetic data with strong class-discriminating patterns.
+ * Loads ONLY real data from local CSV files in datasets/ (authoritative).
+ * If a CSV fails to load, returns null and prints "FAILED" — NO synthetic fallback.
  */
 public class UCIDatasets {
     private static final Map<String, Integer> PAPER_INSTANCE_COUNTS = createPaperInstanceCounts();
@@ -545,8 +545,8 @@ public class UCIDatasets {
                 return ds;
             }
         }
-        System.out.println("synthetic");
-        return createIrisSynthetic();
+        System.out.println("FAILED to load — real CSV required");
+        return null;
     }
 
     // ===== WINE (178 x 13 x 3) =====
@@ -581,8 +581,8 @@ public class UCIDatasets {
                 return ds;
             }
         }
-        System.out.println("synthetic");
-        return createWineSynthetic();
+        System.out.println("FAILED to load — real CSV required");
+        return null;
     }
 
     // ===== BREAST CANCER (683 x 9 x 2) =====
@@ -617,8 +617,8 @@ public class UCIDatasets {
                 return ds;
             }
         }
-        System.out.println("synthetic");
-        return createBreastCancerSynthetic();
+        System.out.println("FAILED to load — real CSV required");
+        return null;
     }
 
     // ===== ZOO (101 x 16 x 7) =====
@@ -651,8 +651,8 @@ public class UCIDatasets {
                 return ds;
             }
         }
-        System.out.println("synthetic");
-        return createZooSynthetic();
+        System.out.println("FAILED to load — real CSV required");
+        return null;
     }
 
     // ===== GLASS (214 x 9 x 6) =====
@@ -690,8 +690,8 @@ public class UCIDatasets {
                 return ds;
             }
         }
-        System.out.println("synthetic");
-        return createGlassSynthetic();
+        System.out.println("FAILED to load — real CSV required");
+        return null;
     }
 
     // ===== TIC-TAC-TOE (958 x 9 x 2) =====
@@ -712,8 +712,8 @@ public class UCIDatasets {
                 return ds;
             }
         }
-        System.out.println("synthetic");
-        return createTicTacToeSynthetic();
+        System.out.println("FAILED to load — real CSV required");
+        return null;
     }
 
     // ===== LYMPHOGRAPHY (148 x 18 x 4) =====
@@ -749,8 +749,8 @@ public class UCIDatasets {
                 return ds;
             }
         }
-        System.out.println("synthetic");
-        return createLymphographySynthetic();
+        System.out.println("FAILED to load — real CSV required");
+        return null;
     }
 
     // ===== HEART (270 x 13 x 2) =====
@@ -782,8 +782,8 @@ public class UCIDatasets {
                 return ds;
             }
         }
-        System.out.println("synthetic");
-        return createHeartSynthetic();
+        System.out.println("FAILED to load — real CSV required");
+        return null;
     }
 
     // ===== PIMA DIABETES (768 x 8 x 2) =====
@@ -919,192 +919,4 @@ public class UCIDatasets {
         return null;
     }
 
-    // ===== SYNTHETIC FALLBACKS =====
-
-    static Dataset createIrisSynthetic() {
-        double[][] raw = {
-            {5.1,3.5,1.4,0.2},{4.9,3.0,1.4,0.2},{4.7,3.2,1.3,0.2},{4.6,3.1,1.5,0.2},{5.0,3.6,1.4,0.2},
-            {5.4,3.9,1.7,0.4},{4.6,3.4,1.4,0.3},{5.0,3.4,1.5,0.2},{4.4,2.9,1.4,0.2},{4.9,3.1,1.5,0.1},
-            {5.4,3.7,1.5,0.2},{4.8,3.4,1.6,0.2},{4.8,3.0,1.4,0.1},{4.3,3.0,1.1,0.1},{5.8,4.0,1.2,0.2},
-            {5.7,4.4,1.5,0.4},{5.4,3.9,1.3,0.4},{5.1,3.5,1.4,0.3},{5.7,3.8,1.7,0.3},{5.1,3.8,1.5,0.3},
-            {5.4,3.4,1.7,0.2},{5.1,3.7,1.5,0.4},{4.6,3.6,1.0,0.2},{5.1,3.3,1.7,0.5},{4.8,3.4,1.9,0.2},
-            {5.0,3.0,1.6,0.2},{5.0,3.4,1.6,0.4},{5.2,3.5,1.5,0.2},{5.2,3.4,1.4,0.2},{4.7,3.2,1.6,0.2},
-            {4.8,3.1,1.6,0.2},{5.4,3.4,1.5,0.4},{5.2,4.1,1.5,0.1},{5.5,4.2,1.4,0.2},{4.9,3.1,1.5,0.2},
-            {5.0,3.2,1.2,0.2},{5.5,3.5,1.3,0.2},{4.9,3.6,1.4,0.1},{4.4,3.0,1.3,0.2},{5.1,3.4,1.5,0.2},
-            {5.0,3.5,1.3,0.3},{4.5,2.3,1.3,0.3},{4.4,3.2,1.3,0.2},{5.0,3.5,1.6,0.6},{5.1,3.8,1.9,0.4},
-            {4.8,3.0,1.4,0.3},{5.1,3.8,1.6,0.2},{4.6,3.2,1.4,0.2},{5.3,3.7,1.5,0.2},{5.0,3.3,1.4,0.2},
-            {7.0,3.2,4.7,1.4},{6.4,3.2,4.5,1.5},{6.9,3.1,4.9,1.5},{5.5,2.3,4.0,1.3},{6.5,2.8,4.6,1.5},
-            {5.7,2.8,4.5,1.3},{6.3,3.3,4.7,1.6},{4.9,2.4,3.3,1.0},{6.6,2.9,4.6,1.3},{5.2,2.7,3.9,1.4},
-            {5.0,2.0,3.5,1.0},{5.9,3.0,4.2,1.5},{6.0,2.2,4.0,1.0},{6.1,2.9,4.7,1.4},{5.6,2.9,3.6,1.3},
-            {6.7,3.1,4.4,1.4},{5.6,3.0,4.5,1.5},{5.8,2.7,4.1,1.0},{6.2,2.2,4.5,1.5},{5.6,2.5,3.9,1.1},
-            {5.9,3.2,4.8,1.8},{6.1,2.8,4.0,1.3},{6.3,2.5,4.9,1.5},{6.1,2.8,4.7,1.2},{6.4,2.9,4.3,1.3},
-            {6.6,3.0,4.4,1.4},{6.8,2.8,4.8,1.4},{6.7,3.0,5.0,1.7},{6.0,2.9,4.5,1.5},{5.7,2.6,3.5,1.0},
-            {5.5,2.4,3.8,1.1},{5.5,2.4,3.7,1.0},{5.8,2.7,3.9,1.2},{6.0,2.7,5.1,1.6},{5.4,3.0,4.5,1.5},
-            {6.0,3.4,4.5,1.6},{6.7,3.1,4.7,1.5},{6.3,2.3,4.4,1.3},{5.6,3.0,4.1,1.3},{5.5,2.5,4.0,1.3},
-            {5.5,2.6,4.4,1.2},{6.1,3.0,4.6,1.4},{5.8,2.6,4.0,1.2},{5.0,2.3,3.3,1.0},{5.6,2.7,4.2,1.3},
-            {5.7,3.0,4.2,1.2},{5.7,2.9,4.2,1.3},{6.2,2.9,4.3,1.3},{5.1,2.5,3.0,1.1},{5.7,2.8,4.1,1.3},
-            {6.3,3.3,6.0,2.5},{5.8,2.7,5.1,1.9},{7.1,3.0,5.9,2.1},{6.3,2.9,5.6,1.8},{6.5,3.0,5.8,2.2},
-            {7.6,3.0,6.6,2.1},{4.9,2.5,4.5,1.7},{7.3,2.9,6.3,1.8},{6.7,2.5,5.8,1.8},{7.2,3.6,6.1,2.5},
-            {6.5,3.2,5.1,2.0},{6.4,2.7,5.3,1.9},{6.8,3.0,5.5,2.1},{5.7,2.5,5.0,2.0},{5.8,2.8,5.1,2.4},
-            {6.4,3.2,5.3,2.3},{6.5,3.0,5.5,1.8},{7.7,3.8,6.7,2.2},{7.7,2.6,6.9,2.3},{6.0,2.2,5.0,1.5},
-            {6.9,3.2,5.7,2.3},{5.6,2.8,4.9,2.0},{7.7,2.8,6.7,2.0},{6.3,2.7,4.9,1.8},{6.7,3.3,5.7,2.1},
-            {7.2,3.2,6.0,1.8},{6.2,2.8,4.8,1.8},{6.1,3.0,4.9,1.8},{6.4,2.8,5.6,2.1},{7.2,3.0,5.8,1.6},
-            {7.4,2.8,6.1,1.9},{7.9,3.8,6.4,2.0},{6.4,2.8,5.6,2.2},{6.3,2.8,5.1,1.5},{6.1,2.6,5.6,1.4},
-            {7.7,3.0,6.1,2.3},{6.3,3.4,5.6,2.4},{6.4,3.1,5.5,1.8},{6.0,3.0,4.8,1.8},{6.9,3.1,5.4,2.1},
-            {6.7,3.1,5.6,2.4},{6.9,3.1,5.1,2.3},{5.8,2.7,5.1,1.9},{6.8,3.2,5.9,2.3},{6.7,3.3,5.7,2.5},
-            {6.7,3.0,5.2,2.3},{6.3,2.5,5.0,1.9},{6.5,3.0,5.2,2.0},{6.2,3.4,5.4,2.3},{5.9,3.0,5.1,1.8}
-        };
-        int[] labels = new int[150];
-        for (int i = 50; i < 100; i++) labels[i] = 1;
-        for (int i = 100; i < 150; i++) labels[i] = 2;
-        int[][] txn = discretize(raw, 4, new int[]{5,5,5,5});
-        return new Dataset("Iris", txn, labels, 4, 3,
-                "150 instances, 4 numeric attrs, 3 classes", 0.01, 0.50, 94.0, 94.7, 95.3, "synthetic");
-    }
-
-    static Dataset createWineSynthetic() {
-        Random rng = new Random(42);
-        int n = 178;
-        double[][] raw = new double[n][13];
-        int[] labels = new int[n];
-        int[] sizes = {59, 71, 48};
-        double[][] means = {{13.7,2.0,2.5,17.0,106,2.8,3.0,0.29,1.9,5.5,1.06,3.2,1100},{12.3,1.9,2.2,20.0,95,2.2,2.0,0.36,1.6,3.1,1.06,2.8,520},{13.2,3.3,2.4,21.5,99,1.7,0.8,0.45,1.2,7.4,0.68,1.7,630}};
-        double[][] stds = {{0.5,0.3,0.2,2.0,15,0.3,0.4,0.06,0.3,1.0,0.1,0.4,300},{0.5,0.5,0.3,3.0,20,0.4,0.5,0.08,0.4,1.5,0.2,0.5,200},{0.5,0.5,0.3,2.0,12,0.3,0.3,0.08,0.3,1.5,0.1,0.3,200}};
-        int idx = 0;
-        for (int c = 0; c < 3; c++)
-            for (int i = 0; i < sizes[c]; i++) {
-                labels[idx] = c;
-                for (int a = 0; a < 13; a++) raw[idx][a] = means[c][a] + rng.nextGaussian() * stds[c][a];
-                idx++;
-            }
-        int[] bins = new int[13]; Arrays.fill(bins, 4);
-        int[][] txn = discretize(raw, 13, bins);
-        return new Dataset("Wine", txn, labels, 13, 3, "178 instances, 13 numeric attrs, 3 classes",
-                0.01, 0.50, 95.0, 91.6, 92.7, "synthetic");
-    }
-
-    static Dataset createBreastCancerSynthetic() {
-        Random rng = new Random(123); int n = 683;
-        int[][] txn = new int[n][]; int[] labels = new int[n]; int benign = 444;
-        for (int i = 0; i < n; i++) {
-            labels[i] = (i < benign) ? 0 : 1;
-            int[] items = new int[9];
-            for (int a = 0; a < 9; a++) {
-                int val = labels[i] == 0 ? 1 + rng.nextInt(3) : 5 + rng.nextInt(5);
-                val = Math.max(1, Math.min(10, val + rng.nextInt(2) - 1));
-                items[a] = a * 3 + ((val <= 3) ? 0 : (val <= 6) ? 1 : 2);
-            }
-            txn[i] = items;
-        }
-        return new Dataset("Breast-Cancer", txn, labels, 9, 2, "683 instances, 9 attrs, 2 classes",
-                0.01, 0.50, 96.4, 95.0, 95.0, "synthetic");
-    }
-
-    static Dataset createZooSynthetic() {
-        int[] labels = new int[101]; int[][] txn = new int[101][];
-        int[] sizes = {41,20,5,13,4,8,10};
-        int[][] pats = {{1,0,0,1,0,0,1,1,1,1,0,0,1,1,0,1},{0,1,1,0,1,0,0,0,1,1,0,0,1,1,0,0},{0,0,1,0,0,0,1,1,1,1,1,0,0,1,0,0},{0,0,1,0,0,1,1,1,1,0,0,1,0,1,0,0},{0,0,1,0,0,1,1,1,1,1,0,0,1,1,0,0},{0,0,1,0,1,0,0,0,0,1,0,0,1,0,0,0},{0,0,1,0,0,1,1,0,0,0,0,0,1,0,0,0}};
-        Random rng = new Random(222); int idx = 0;
-        for (int c = 0; c < 7; c++)
-            for (int i = 0; i < sizes[c]; i++) {
-                labels[idx] = c; txn[idx] = new int[16];
-                for (int a = 0; a < 16; a++) {
-                    int v = pats[c][a]; if (rng.nextDouble() < 0.05) v = 1 - v;
-                    txn[idx][a] = a * 2 + v;
-                }
-                idx++;
-            }
-        return new Dataset("Zoo", txn, labels, 16, 7, "101 instances, 16 boolean attrs, 7 classes",
-                0.01, 0.50, 97.1, 96.8, 92.2, "synthetic");
-    }
-
-    static Dataset createGlassSynthetic() {
-        Random rng = new Random(789); int n = 214;
-        double[][] raw = new double[n][9]; int[] labels = new int[n];
-        int[] sizes = {70,76,17,13,9,29};
-        double[][] means = {{1.518,13.2,3.5,1.4,72.6,0.5,8.8,0.0,0.1},{1.518,13.0,3.5,1.2,72.9,0.6,8.6,0.0,0.1},{1.518,13.5,3.4,1.3,72.5,0.6,8.7,0.0,0.1},{1.516,13.3,2.7,1.7,73.0,0.6,8.4,0.4,0.1},{1.517,14.7,0.0,2.2,73.1,0.1,8.0,0.9,0.0},{1.520,14.5,0.0,2.7,73.2,0.0,8.3,1.2,0.0}};
-        double[] stds = {0.003,0.8,0.8,0.5,0.7,0.3,0.8,0.5,0.1};
-        int idx = 0;
-        for (int c = 0; c < 6; c++)
-            for (int i = 0; i < sizes[c]; i++) {
-                labels[idx] = c;
-                for (int a = 0; a < 9; a++) raw[idx][a] = means[c][a] + rng.nextGaussian() * stds[a];
-                idx++;
-            }
-        int[] bins = new int[9]; Arrays.fill(bins, 5);
-        int[][] txn = discretize(raw, 9, bins);
-        return new Dataset("Glass", txn, labels, 9, 6, "214 instances, 9 numeric attrs, 6 classes",
-                0.01, 0.50, 70.1, 73.9, 68.7, "synthetic");
-    }
-
-    static Dataset createTicTacToeSynthetic() {
-        int n = 958; int[][] txn = new int[n][]; int[] labels = new int[n];
-        Random rng = new Random(111);
-        int[][] wins = {{0,1,2},{3,4,5},{6,7,8},{0,3,6},{1,4,7},{2,5,8},{0,4,8},{2,4,6}};
-        int idx = 0;
-        for (int i = 0; i < 626; i++) {
-            int[] b = new int[9]; int[] w = wins[rng.nextInt(8)];
-            for (int p : w) b[p] = 0;
-            for (int j = 0; j < 9; j++) if (!contains(w, j)) { double p = rng.nextDouble(); b[j] = p < 0.35 ? 0 : p < 0.7 ? 1 : 2; }
-            txn[idx] = new int[9]; for (int j = 0; j < 9; j++) txn[idx][j] = j * 3 + b[j]; labels[idx++] = 1;
-        }
-        for (int i = 0; i < 332; i++) {
-            int[] b = new int[9];
-            for (int j = 0; j < 9; j++) { double p = rng.nextDouble(); b[j] = p < 0.3 ? 0 : p < 0.65 ? 1 : 2; }
-            for (int[] w : wins) if (b[w[0]] == 0 && b[w[1]] == 0 && b[w[2]] == 0) b[w[rng.nextInt(3)]] = 1;
-            txn[idx] = new int[9]; for (int j = 0; j < 9; j++) txn[idx][j] = j * 3 + b[j]; labels[idx++] = 0;
-        }
-        return new Dataset("Tic-Tac-Toe", txn, labels, 9, 2, "958 instances, 9 categorical attrs, 2 classes",
-                0.01, 0.50, 99.2, 98.6, 83.4, "synthetic");
-    }
-
-    static Dataset createLymphographySynthetic() {
-        Random rng = new Random(333); int n = 148; int[][] txn = new int[n][]; int[] labels = new int[n];
-        int[] sizes = {2,81,61,4};
-        int[][] dom = {{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},{1,1,0,1,1,0,1,0,1,0,1,1,0,1,0,1,1,0},{2,0,1,2,0,1,2,1,0,1,2,0,1,2,1,0,2,1},{0,2,2,0,1,2,0,2,1,2,0,2,2,0,1,2,0,2}};
-        int idx = 0;
-        for (int c = 0; c < 4; c++)
-            for (int i = 0; i < sizes[c]; i++) {
-                labels[idx] = c; txn[idx] = new int[18];
-                for (int a = 0; a < 18; a++) { int v = dom[c][a]; if (rng.nextDouble() < 0.15) v = rng.nextInt(3); txn[idx][a] = a * 3 + v; }
-                idx++;
-            }
-        return new Dataset("Lymphography", txn, labels, 18, 4, "148 instances, 18 attrs, 4 classes",
-                0.01, 0.50, 83.1, 77.8, 73.5, "synthetic");
-    }
-
-    static Dataset createHeartSynthetic() {
-        Random rng = new Random(456); int n = 270; int[][] txn = new int[n][]; int[] labels = new int[n];
-        int positive = 120; int[] disc = {0,3,4,7,11};
-        for (int i = 0; i < n; i++) {
-            labels[i] = (i < n - positive) ? 0 : 1; txn[i] = new int[13];
-            for (int a = 0; a < 13; a++) {
-                int bin; boolean isD = false; for (int d : disc) if (a == d) isD = true;
-                if (isD) bin = labels[i] == 1 ? (rng.nextDouble() < 0.65 ? 2 : rng.nextInt(3)) : (rng.nextDouble() < 0.65 ? 0 : rng.nextInt(3));
-                else bin = rng.nextInt(3);
-                txn[i][a] = a * 3 + bin;
-            }
-        }
-        return new Dataset("Heart", txn, labels, 13, 2, "270 instances, 13 attrs, 2 classes",
-                0.01, 0.50, 82.2, 81.9, 80.0, "synthetic");
-    }
-
-    // ===== HELPERS =====
-    static int[][] discretize(double[][] data, int numAttrs, int[] binsPerAttr) {
-        int n = data.length;
-        double[] mins = new double[numAttrs], maxs = new double[numAttrs];
-        Arrays.fill(mins, Double.MAX_VALUE); Arrays.fill(maxs, -Double.MAX_VALUE);
-        for (double[] row : data) for (int a = 0; a < numAttrs; a++) { mins[a] = Math.min(mins[a], row[a]); maxs[a] = Math.max(maxs[a], row[a]); }
-        int[] offsets = new int[numAttrs]; int off = 0;
-        for (int a = 0; a < numAttrs; a++) { offsets[a] = off; off += binsPerAttr[a]; }
-        int[][] result = new int[n][numAttrs];
-        for (int i = 0; i < n; i++) for (int a = 0; a < numAttrs; a++) {
-            double range = maxs[a] - mins[a];
-            int bin = (range == 0) ? 0 : Math.min((int)((data[i][a] - mins[a]) / range * binsPerAttr[a]), binsPerAttr[a] - 1);
-            result[i][a] = offsets[a] + bin;
-        }
-        return result;
-    }
-
-    private static boolean contains(int[] arr, int val) { for (int v : arr) if (v == val) return true; return false; }
 }

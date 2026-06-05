@@ -6,8 +6,8 @@ import java.net.*;
 import java.util.*;
 
 /**
- * Downloads and parses real UCI ML datasets.
- * Falls back to realistic synthetic data if download fails.
+ * Parses real UCI ML datasets from local CSV files (authoritative).
+ * No synthetic data — if parsing fails, the caller returns null.
  */
 public class DataLoader {
 
