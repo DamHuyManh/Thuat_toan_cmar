@@ -15,19 +15,13 @@ public class RulePruner {
     private double chiSquareThreshold;
     private int maxCoverageCount; // delta in paper (default 3)
     private double minConfidence;
-    // Hybrid HM+Lift mode (WCBA + WEviRC): when true, filter by Lift>=1.0 and HM>=minHM.
+    // Hybrid HM+Lift mode (WCBA + WEviRC): kept for ablation reproducibility
     public static boolean useHMLift = false;
     public static double minLift = 1.0;
-    public static double minHM = 0.005; // tuned for relSupp-based HM (sup/N)
-    // New: stricter Lift filter applied IN ADDITION to chi² (only when > 0). 0 = disabled.
-    public static double strictLift = 0.0;
-    // P2: Stratified coverage — protect top-N rules per class before normal DCP.
-    // 0 = disabled. Recommended: 3-10.
+    public static double minHM = 0.005;
+    // Stratified coverage (NEW, WIN improvement): protect top-N rules per class before DCP.
+    // 0 = disabled. Recommended: 10.
     public static int stratifiedTopN = 0;
-    // P3: Dual-criterion filter — keep rule if χ² OK OR (Lift≥minLift AND conf≥minConfDual).
-    public static boolean useDualFilter = false;
-    public static double dualMinLift = 1.5;
-    public static double dualMinConf = 0.7;
 
     /** Phase 11: scratch AND cho chi²; lưu N tối thiểu vì BitSet.clear() làm length() = 0. */
     private static final class ChiScratchHolder {
@@ -119,10 +113,7 @@ public class RulePruner {
             rule.chiSquare = chi2;
 
             double priorProb = (double) clsSupport / N;
-            boolean chiOK = chi2 >= chiSquareThreshold && rule.confidence > priorProb;
-            boolean dualOK = useDualFilter && rule.lift >= dualMinLift && rule.confidence >= dualMinConf;
-            if (chiOK || dualOK) {
-                if (strictLift > 0.0 && rule.lift < strictLift) continue;
+            if (chi2 >= chiSquareThreshold && rule.confidence > priorProb) {
                 pruned.add(rule);
             }
         }

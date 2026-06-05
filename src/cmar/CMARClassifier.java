@@ -19,20 +19,15 @@ public class CMARClassifier {
     private int maxAntecedentLength;
     // Top-k global matched rules voting. 0 = use all matched rules (paper-faithful).
     private int topKGlobal;
-    // Hybrid: when true, use HM as voting weight (but keep CMAR sort for pruning).
-    public static boolean useHMWeightOnly = false;
-    // Alternative: use Lift as voting weight (WEviRC-inspired).
-    // Lift>1 = positive correlation; stronger correlation → larger vote.
+    // Vote weight alternatives — kept for ablation reproducibility (negative results in paper)
     public static boolean useLiftWeight = false;
-    // Composite weight = χ² × Lift  (statistical significance × correlation strength)
     public static boolean useChiLiftWeight = false;
-    // Composite weight = confidence × Lift  (predictive accuracy × correlation)
     public static boolean useConfLiftWeight = false;
-    // CPAR-style: average weights per class (instead of sum) — fair across class sizes.
-    public static boolean useAvgVote = false;
-    // CPAR-style: take top-k of EACH class's matched rules (instead of global top-k).
-    // 0 = disabled (use topKGlobal).
-    public static int perClassTopK = 0;
+    // Cost-sensitive voting (NEW, WIN improvement): triggers only on imbalanced data.
+    // score(c) *= (N / classFreq[c]) when max/min class frequency ratio > imbalanceThreshold.
+    // Reference: Fawcett 2006 "An introduction to ROC analysis"
+    public static boolean useCostSensitive = false;
+    public static double imbalanceThreshold = 1.5;
 
     private CRTree crTree;
     private int defaultClass;
@@ -128,15 +123,13 @@ public class CMARClassifier {
         int N = transactions.length;
         for (Rule rule : prunedRules) {
             if (useChiLiftWeight) {
-                // χ² × Lift — combine statistical significance and correlation magnitude
                 double chiNorm = computeNormalizedChiSquare(rule, N, classCounts);
                 rule.weight = chiNorm * rule.lift;
             } else if (useConfLiftWeight) {
-                // confidence × Lift — combine predictive accuracy with correlation strength
                 rule.weight = rule.confidence * rule.lift;
             } else if (useLiftWeight) {
                 rule.weight = rule.lift;
-            } else if (Rule.useHMLift || useHMWeightOnly) {
+            } else if (Rule.useHMLift) {
                 rule.weight = rule.hm;
             } else {
                 rule.weight = computeNormalizedChiSquare(rule, N, classCounts);
@@ -188,35 +181,32 @@ public class CMARClassifier {
             return unanimousClass;
         }
 
-        // Step 2: Weighted group voting (paper Section 4 + CPAR-style extensions)
+        // Step 2: Weighted group voting (paper Section 4)
         Map<Integer, Double> classScores = new HashMap<>();
         Map<Integer, Integer> classCounts = new HashMap<>();
 
-        if (perClassTopK > 0) {
-            // CPAR-style: keep top-k rules per class, then sum/avg those
-            Map<Integer, Integer> perClassSeen = new HashMap<>();
-            for (Rule r : allMatched) {
-                int seen = perClassSeen.getOrDefault(r.classLabel, 0);
-                if (seen >= perClassTopK) continue;
-                classScores.merge(r.classLabel, r.weight, Double::sum);
-                classCounts.merge(r.classLabel, 1, Integer::sum);
-                perClassSeen.put(r.classLabel, seen + 1);
-            }
-        } else {
-            int limit = allMatched.size();
-            if (topKGlobal > 0) limit = Math.min(limit, topKGlobal);
-            for (int i = 0; i < limit; i++) {
-                Rule r = allMatched.get(i);
-                classScores.merge(r.classLabel, r.weight, Double::sum);
-                classCounts.merge(r.classLabel, 1, Integer::sum);
-            }
+        int limit = allMatched.size();
+        if (topKGlobal > 0) limit = Math.min(limit, topKGlobal);
+        for (int i = 0; i < limit; i++) {
+            Rule r = allMatched.get(i);
+            classScores.merge(r.classLabel, r.weight, Double::sum);
+            classCounts.merge(r.classLabel, 1, Integer::sum);
         }
-        if (useAvgVote) {
-            for (Map.Entry<Integer, Integer> e : classCounts.entrySet()) {
-                int cnt = e.getValue();
-                if (cnt > 0) {
-                    Double sum = classScores.get(e.getKey());
-                    if (sum != null) classScores.put(e.getKey(), sum / cnt);
+
+        // I1: Cost-sensitive scaling — only on imbalanced data (max/min freq > threshold).
+        // score(c) *= (N / classFreq[c]) → minority class scores boosted proportional to rarity.
+        if (useCostSensitive && Rule.CLASS_FREQS != null && Rule.TOTAL_N > 0 && !Rule.CLASS_FREQS.isEmpty()) {
+            int maxFreq = Integer.MIN_VALUE, minFreq = Integer.MAX_VALUE;
+            for (int f : Rule.CLASS_FREQS.values()) {
+                if (f > maxFreq) maxFreq = f;
+                if (f < minFreq && f > 0) minFreq = f;
+            }
+            if (minFreq > 0 && (double) maxFreq / minFreq > imbalanceThreshold) {
+                for (Map.Entry<Integer, Double> e : new HashMap<>(classScores).entrySet()) {
+                    int c = e.getKey();
+                    int freq = Rule.CLASS_FREQS.getOrDefault(c, Rule.TOTAL_N);
+                    double scale = (double) Rule.TOTAL_N / Math.max(1, freq);
+                    classScores.put(c, e.getValue() * scale);
                 }
             }
         }
@@ -248,6 +238,12 @@ public class CMARClassifier {
             if (predictions[i] == testLabels[i]) correct++;
         }
         return (double) correct / testLabels.length;
+    }
+
+    /** Compute accuracy + macro/weighted Precision/Recall/F1. */
+    public Metrics scoreFull(int[][] testData, int[] testLabels) {
+        int[] predictions = predict(testData);
+        return Metrics.compute(predictions, testLabels);
     }
 
     /**

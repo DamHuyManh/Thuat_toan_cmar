@@ -17,7 +17,7 @@ public class BenchmarkRunner {
     static final String RESULTS_DIR = "results";
     static final double TUNE_TRIGGER_DIFF = 2.0; // tune when gap vs paper is larger than 2%
     static final int TUNE_FOLDS = 2; // fast tuning with 2 folds
-    static int TOP_K_GLOBAL = 3; // 0 = paper-faithful (use all matched rules); >0 = top-k voting
+    static int TOP_K_GLOBAL = 0; // 0 = paper-faithful (use all matched rules); >0 = top-k voting (tested: worse than 0)
     /** Khi true: lưới tham số quanh giá trị paper để tối đa hóa accuracy CV (khác so sánh 1–1 paper). */
     static boolean TUNE_MAX_ACCURACY = false;
     /** Khi true: ghi ra results/rules/&lt;dataset&gt;-rules.csv cho mỗi bộ (luật từ fold cuối). */
@@ -48,24 +48,11 @@ public class BenchmarkRunner {
                 cmar.RulePruner.minHM = 0.0;         // disable HM filter
                 cmar.Rule.useHMLift = false;         // keep CMAR sort + chi² vote
             }
-            if (arg.equalsIgnoreCase("--hmWeightOnly")) {
-                // WCBA-light: keep CMAR pruning order intact, only swap voting weight to HM.
-                cmar.CMARClassifier.useHMWeightOnly = true;
-                cmar.Rule.useHMLift = false;
-                cmar.RulePruner.useHMLift = false;
-            }
             if (arg.equalsIgnoreCase("--dumpRules")) DUMP_RULES = true;
             if (arg.equalsIgnoreCase("--liftSort")) {
-                // Sort rules by Lift DESC first. CMAR-replacement direction: "larger Lift first".
+                // Sort rules by Lift DESC first (ablation reproducibility).
                 cmar.Rule.useLiftSort = true;
                 cmar.Rule.useHMLift = false;
-            }
-            if (arg.equalsIgnoreCase("--longerRules")) cmar.Rule.useLongerRules = true;
-            if (arg.equalsIgnoreCase("--liftSort")) cmar.Rule.useLiftSort = true;
-            if (arg.equalsIgnoreCase("--avgVote")) cmar.CMARClassifier.useAvgVote = true;
-            if (arg.startsWith("--perClassTopK=")) {
-                try { cmar.CMARClassifier.perClassTopK = Math.max(0, Integer.parseInt(arg.substring(15))); }
-                catch (NumberFormatException ignored) {}
             }
             if (arg.equalsIgnoreCase("--liftWeight")) {
                 // Lift-based voting: weight = Lift (positive correlation magnitude).
@@ -89,65 +76,9 @@ public class BenchmarkRunner {
                 try { CHI_OVERRIDE = Double.parseDouble(arg.substring(15)); }
                 catch (NumberFormatException ignored) {}
             }
-            if (arg.equalsIgnoreCase("--liftTieBreak")) {
-                // Lift as 3rd-criterion tiebreaker in CMAR sort (keeps paper primary order).
-                cmar.Rule.useLiftTieBreak = true;
-            }
-            if (arg.equalsIgnoreCase("--liftSecond")) {
-                // Lift in position 2: conf DESC → Lift DESC → sup DESC → length ASC
-                cmar.Rule.useLiftSecond = true;
-            }
-            if (arg.equalsIgnoreCase("--chiFirst")) {
-                // Sort by chi² DESC → confidence DESC → length ASC
-                cmar.Rule.useChiFirst = true;
-            }
-            if (arg.equalsIgnoreCase("--sortCompose")) {
-                // Sort by (confidence × Lift) DESC → length ASC
-                cmar.Rule.useSortCompose = true;
-            }
-            if (arg.equalsIgnoreCase("--sortChiLift")) {
-                // Sort by (chi² × Lift) DESC → length ASC
-                cmar.Rule.useSortChiLift = true;
-            }
-            if (arg.equalsIgnoreCase("--confLinear")) {
-                // Sort by (confidence + 0.1 × Lift) DESC → length ASC
-                cmar.Rule.useConfLinear = true;
-            }
-            if (arg.startsWith("--confLinearAlpha=")) {
-                try { cmar.Rule.confLinearAlpha = Double.parseDouble(arg.substring(18)); }
-                catch (NumberFormatException ignored) {}
-            }
-            if (arg.equalsIgnoreCase("--condLift")) {
-                // Conditional: if conf==1 use Lift, else use support
-                cmar.Rule.useCondLift = true;
-            }
-            if (arg.equalsIgnoreCase("--dominantClass")) {
-                // CMAR sort + class frequency tie-breaker (MCAR/EAC style)
-                cmar.Rule.useDominantClass = true;
-            }
-            // P1: Class-weighted sort
-            if (arg.equalsIgnoreCase("--classWeightedSort")) {
-                cmar.Rule.useClassWeightedSort = true;
-            }
-            // P2: Stratified coverage
+            // Stratified Coverage Pruning (NEW WIN improvement)
             if (arg.startsWith("--stratified=")) {
                 try { cmar.RulePruner.stratifiedTopN = Integer.parseInt(arg.substring(13)); }
-                catch (NumberFormatException ignored) {}
-            }
-            // P3: Dual-criterion filter
-            if (arg.equalsIgnoreCase("--dualFilter")) {
-                cmar.RulePruner.useDualFilter = true;
-            }
-            if (arg.startsWith("--dualMinLift=")) {
-                try { cmar.RulePruner.dualMinLift = Double.parseDouble(arg.substring(14)); }
-                catch (NumberFormatException ignored) {}
-            }
-            if (arg.startsWith("--dualMinConf=")) {
-                try { cmar.RulePruner.dualMinConf = Double.parseDouble(arg.substring(14)); }
-                catch (NumberFormatException ignored) {}
-            }
-            if (arg.startsWith("--strictLift=")) {
-                try { cmar.RulePruner.strictLift = Double.parseDouble(arg.substring(13)); }
                 catch (NumberFormatException ignored) {}
             }
             if (arg.equalsIgnoreCase("--weightChiLift")) {
@@ -160,6 +91,14 @@ public class BenchmarkRunner {
                 cmar.CMARClassifier.useConfLiftWeight = true;
                 cmar.CMARClassifier.useLiftWeight = false;
             }
+            // I1 (NEW): Cost-sensitive voting on imbalanced data
+            if (arg.equalsIgnoreCase("--costSensitive")) {
+                cmar.CMARClassifier.useCostSensitive = true;
+            }
+            if (arg.startsWith("--imbalanceThreshold=")) {
+                try { cmar.CMARClassifier.imbalanceThreshold = Double.parseDouble(arg.substring(21)); }
+                catch (NumberFormatException ignored) {}
+            }
         }
         if (mode.equals("baseline")) {
             cmar.util.OptimizationProfile.setMode(cmar.util.OptimizationProfile.Mode.BASELINE);
@@ -167,20 +106,10 @@ public class BenchmarkRunner {
         } else {
             cmar.util.OptimizationProfile.setMode(cmar.util.OptimizationProfile.Mode.IMPROVED);
             String tag = (TOP_K_GLOBAL > 0 ? "topK=" + TOP_K_GLOBAL : "all-rules");
-            if (cmar.Rule.useLiftSort) {
-                tag += ", Lift-sort (Larger-Lift-first)";
-            } else if (cmar.Rule.useHMLift) {
-                tag += ", HM+Lift hybrid (minHM=" + cmar.RulePruner.minHM
-                        + ", minLift=" + cmar.RulePruner.minLift + ")";
-            } else if (cmar.CMARClassifier.useHMWeightOnly) {
-                tag += ", HM voting weight only";
-            } else if (cmar.CMARClassifier.useLiftWeight) {
-                tag += ", Lift voting weight";
-            } else if (cmar.RulePruner.useHMLift) {
-                tag += ", Lift filter only";
-            }
-            if (cmar.Rule.useLongerRules) tag += ", longer-rules";
             if (cmar.Rule.useLiftSort) tag += ", Lift-sort";
+            else if (cmar.Rule.useHMLift) tag += ", HM+Lift hybrid";
+            else if (cmar.CMARClassifier.useLiftWeight) tag += ", Lift voting weight";
+            else if (cmar.RulePruner.useHMLift) tag += ", Lift filter only";
             System.out.println("=== CMAR Benchmark — IMPROVED (" + tag + ") ===\n");
             if (TUNE_MAX_ACCURACY) {
                 System.out.println("** --tuneAccuracy: tối đa hóa accuracy (lưới tham số / fold nhanh) **\n");
@@ -368,6 +297,10 @@ public class BenchmarkRunner {
         result.minConfidence = best.minConfidence;
         result.avgMineMs = best.avgMineMs;
         result.avgPruneMs = best.avgPruneMs;
+        result.f1Macro = best.f1Macro;
+        result.precMacro = best.precMacro;
+        result.recallMacro = best.recallMacro;
+        result.f1Weighted = best.f1Weighted;
         result.avgChiSqMs = best.avgChiSqMs;
         result.avgG2SMs = best.avgG2SMs;
         result.avgCovMs = best.avgCovMs;
@@ -389,6 +322,9 @@ public class BenchmarkRunner {
         double result_mineMs = 0, result_pruneMs = 0, result_chiSqMs = 0;
         double result_g2sMs = 0, result_covMs = 0, result_bmapMs = 0, result_indexMs = 0;
         long result_peakMB = 0;
+        // Phase 02+: F1/Precision/Recall accumulators (averaged across folds)
+        double result_f1Macro = 0, result_precMacro = 0, result_recallMacro = 0;
+        double result_f1Weighted = 0;
 
         int actualFolds = Math.max(1, Math.min(folds, evalFoldCount));
         for (int f = 0; f < actualFolds; f++) {
@@ -452,9 +388,16 @@ public class BenchmarkRunner {
 
             // Predict
             long t1 = System.nanoTime();
-            double acc = cmar.score(testData, testLabels);
+            cmar.Metrics m = cmar.scoreFull(testData, testLabels);
+            double acc = m.accuracy;
             long predictTime = (System.nanoTime() - t1) / 1_000_000;
             mem.stop();
+
+            // Accumulate F1/Precision/Recall across folds
+            result_f1Macro      += m.f1Macro;
+            result_precMacro    += m.precisionMacro;
+            result_recallMacro  += m.recallMacro;
+            result_f1Weighted   += m.f1Weighted;
 
             // Aggregate phase timings
             result_mineMs   += PhaseTimer.getMillis("mining");
@@ -497,6 +440,10 @@ public class BenchmarkRunner {
         result.avgBmapMs     = result_bmapMs / actualFolds;
         result.avgIndexMs    = result_indexMs / actualFolds;
         result.peakMemMB     = result_peakMB;
+        result.f1Macro       = result_f1Macro / actualFolds;
+        result.precMacro     = result_precMacro / actualFolds;
+        result.recallMacro   = result_recallMacro / actualFolds;
+        result.f1Weighted    = result_f1Weighted / actualFolds;
         return result;
     }
 
@@ -766,6 +713,25 @@ public class BenchmarkRunner {
                     r.avgRulesMined, r.avgRulesPruned, pruneRatio));
         }
 
+        // Phase 02: F1 / Precision / Recall block
+        sb.append("\n## F1 / Precision / Recall (macro average over folds)\n\n");
+        sb.append("| Dataset | Accuracy | Precision (macro) | Recall (macro) | F1 (macro) | F1 (weighted) |\n");
+        sb.append("|---------|---------:|------------------:|---------------:|-----------:|--------------:|\n");
+        double sumAcc = 0, sumP = 0, sumR = 0, sumF = 0, sumFw = 0;
+        for (DatasetResult r : results) {
+            sb.append(String.format(Locale.US,
+                    "| %s | %.4f | %.4f | %.4f | %.4f | %.4f |%n",
+                    r.dataset.name, r.accuracy, r.precMacro, r.recallMacro, r.f1Macro, r.f1Weighted));
+            sumAcc += r.accuracy; sumP += r.precMacro; sumR += r.recallMacro;
+            sumF += r.f1Macro; sumFw += r.f1Weighted;
+        }
+        int n26 = results.size();
+        if (n26 > 0) {
+            sb.append(String.format(Locale.US,
+                    "| **Average** | **%.4f** | **%.4f** | **%.4f** | **%.4f** | **%.4f** |%n",
+                    sumAcc/n26, sumP/n26, sumR/n26, sumF/n26, sumFw/n26));
+        }
+
         sb.append("\n## Parameters Used\n\n");
         sb.append("*Tham s\u1ed1 FP-Growth / CMAR cho t\u1eebng b\u1ed9 (min support d\u1ea1ng t\u1ef7 l\u1ec7 v\u00e0 s\u1ed1 giao d\u1ecbch t\u1ed1i thi\u1ec3u).*\n\n");
         sb.append("| Dataset | Min Support (ratio) | Min Support (abs) | Min Confidence |\n");
@@ -817,6 +783,8 @@ public class BenchmarkRunner {
         // Phase 01 profiling
         double avgMineMs, avgPruneMs, avgChiSqMs, avgG2SMs, avgCovMs, avgBmapMs, avgIndexMs;
         long peakMemMB;
+        // Phase 02: F1 / Precision / Recall (macro avg)
+        double f1Macro, precMacro, recallMacro, f1Weighted;
     }
 
     static class EvalResult {
@@ -831,6 +799,8 @@ public class BenchmarkRunner {
         // Phase 01 profiling
         double avgMineMs, avgPruneMs, avgChiSqMs, avgG2SMs, avgCovMs, avgBmapMs, avgIndexMs;
         long peakMemMB;
+        // Phase 02: F1 / Precision / Recall (macro avg)
+        double f1Macro, precMacro, recallMacro, f1Weighted;
     }
 
     static class ParamConfig {

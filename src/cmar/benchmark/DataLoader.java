@@ -382,7 +382,7 @@ public class DataLoader {
         public final int[] labels;
         public final int n;
         public final int numAttrs;
-        public final int numBins; // 0 = MDL, >0 = quantile with numBins bins
+        public int numBins; // 0 = MDL, >0 = quantile with numBins bins
 
         @SuppressWarnings("unchecked")
         public RawData(String[][] rawVals, boolean[] isNumeric, boolean[] treatAsCat,
@@ -594,7 +594,7 @@ public class DataLoader {
                     // Equal-frequency quantile cut points from training only
                     cutPoints[a] = quantileCuts(nonMiss, raw.numBins);
                 } else {
-                    // Supervised MDL cut points from training only
+                    // Supervised MDL cut points from training only (numBins == 0)
                     double[] vals = new double[trainIdx.length];
                     int[] lbls = new int[trainIdx.length];
                     for (int i = 0; i < trainIdx.length; i++) {
