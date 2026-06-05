@@ -11,6 +11,11 @@ import java.util.*;
  */
 public class DataLoader {
 
+    /** Fuzzy CMAR: emit top-2 fuzzy bin items for borderline continuous values. */
+    public static boolean FUZZY = false;
+    /** Emit the 2nd fuzzy bin item only when its membership weight exceeds this threshold. */
+    public static double FUZZY_TAU = 0.35;
+
     /**
      * Load dataset from CSV string. Handles numeric (discretize) and categorical (encode) attrs.
      * Last column is class label.
@@ -637,12 +642,26 @@ public class DataLoader {
     private static int[][] encodeRows(RawData raw, int[] indices, int[] offsets,
                                        int[] numValues, List<Double>[] cutPoints, double[] medians) {
         int numAttrs = raw.numAttrs;
-        int[][] result = new int[indices.length][numAttrs];
+
+        // Precompute fuzzy bin centers per continuous attr (only when FUZZY on).
+        double[][] fuzzyCenters = null;
+        if (FUZZY) {
+            fuzzyCenters = new double[numAttrs][];
+            for (int a = 0; a < numAttrs; a++) {
+                if (raw.isNumeric[a] && !raw.treatAsCat[a] && cutPoints[a].size() >= 1) {
+                    fuzzyCenters[a] = cmar.FuzzyDiscretizer.centers(cutPoints[a]);
+                }
+            }
+        }
+
+        int[][] result = new int[indices.length][];
+        // reusable buffer: at most numAttrs + (#continuous attrs) items per transaction
+        int[] buf = new int[numAttrs * 2];
         for (int i = 0; i < indices.length; i++) {
             int row = indices[i];
+            int len = 0;
             for (int a = 0; a < numAttrs; a++) {
                 String val = raw.rawVals[row][a];
-                int encoded;
                 if (raw.isNumeric[a] && !raw.treatAsCat[a]) {
                     double v = val.equals("MISS") ? medians[a] : Double.parseDouble(val);
                     int bin = 0;
@@ -650,13 +669,25 @@ public class DataLoader {
                         if (v > cp) bin++;
                         else break;
                     }
-                    encoded = offsets[a] + Math.min(bin, numValues[a] - 1);
+                    bin = Math.min(bin, numValues[a] - 1);
+                    if (FUZZY && fuzzyCenters != null && fuzzyCenters[a] != null) {
+                        // Fuzzy: emit top-1 membership bin + top-2 bin when borderline (w2 > tau)
+                        cmar.FuzzyDiscretizer.FuzzyBins fb = cmar.FuzzyDiscretizer.fuzzify(v, fuzzyCenters[a]);
+                        int b1 = Math.min(fb.bin1, numValues[a] - 1);
+                        buf[len++] = offsets[a] + b1;
+                        if (fb.bin2 >= 0 && fb.w2 > FUZZY_TAU) {
+                            int b2 = Math.min(fb.bin2, numValues[a] - 1);
+                            if (b2 != b1) buf[len++] = offsets[a] + b2;
+                        }
+                    } else {
+                        buf[len++] = offsets[a] + bin;
+                    }
                 } else {
                     Integer catIdx = raw.catMaps[a] != null ? raw.catMaps[a].get(val) : null;
-                    encoded = offsets[a] + (catIdx != null ? catIdx : 0);
+                    buf[len++] = offsets[a] + (catIdx != null ? catIdx : 0);
                 }
-                result[i][a] = encoded;
             }
+            result[i] = java.util.Arrays.copyOf(buf, len);
         }
         return result;
     }

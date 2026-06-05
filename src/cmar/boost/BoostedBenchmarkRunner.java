@@ -37,6 +37,7 @@ public class BoostedBenchmarkRunner {
     static int MAX_ANT_LEN = 4;            // max antecedent length per rule
     static int MAX_COVERAGE = 4;           // delta in paper
     static int TOP_K = 0;                  // 0 = vote all matched rules (paper-faithful)
+    static java.util.Set<String> ONLY = null; // restrict to these dataset names (lowercase), null=all
 
     public static void main(String[] args) throws IOException {
         for (String a : args) {
@@ -80,6 +81,14 @@ public class BoostedBenchmarkRunner {
                 try { TOP_K = Math.max(0, Integer.parseInt(a.substring(7))); } catch (Exception ignored) {}
             }
             if (a.equalsIgnoreCase("--deterministic")) cmar.FPGrowthOptimized.DETERMINISTIC = true;
+            if (a.startsWith("--only=")) {
+                ONLY = new java.util.HashSet<>();
+                for (String s : a.substring(7).toLowerCase().split(",")) ONLY.add(s.trim());
+            }
+            if (a.equalsIgnoreCase("--fuzzy")) cmar.benchmark.DataLoader.FUZZY = true;
+            if (a.startsWith("--fuzzyTau=")) {
+                try { cmar.benchmark.DataLoader.FUZZY_TAU = Double.parseDouble(a.substring(11)); } catch (Exception ignored) {}
+            }
             if (a.equalsIgnoreCase("--liftWeight")) cmar.CMARClassifier.useLiftWeight = true;
             if (a.equalsIgnoreCase("--weightConfLift")) cmar.CMARClassifier.useConfLiftWeight = true;
             if (a.equalsIgnoreCase("--weightChiLift")) cmar.CMARClassifier.useChiLiftWeight = true;
@@ -95,6 +104,7 @@ public class BoostedBenchmarkRunner {
         List<Row> results = new ArrayList<>();
         for (UCIDatasets.Dataset ds : datasets) {
             if (ds == null) continue;
+            if (ONLY != null && !ONLY.contains(ds.name.toLowerCase())) continue;
             try {
                 System.out.println("Running: " + ds.name + " ...");
                 Row r = runOne(ds);
