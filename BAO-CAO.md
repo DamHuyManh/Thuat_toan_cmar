@@ -134,6 +134,93 @@ Em đã thử **8 kỹ thuật nâng cao** để lift F1/Recall cao hơn nữa. 
 
 ---
 
+## 5B. SO SÁNH TOP-K = 5 / 7 / 10 (chi tiết từng dataset)
+
+> **Top-K là gì**: khi các luật "bỏ phiếu" phân loại, chỉ dùng **K luật mạnh nhất mỗi lớp** (thay vì tất cả). topK=0 = dùng tất cả luật (paper-faithful).
+> **Baseline cho Δ** = topK=0. Δ = (topK config) − (topK=0). Cấu hình chung: Bagging T=10, stratified=10, costSensitive, adaptMinSup sqrt, minSupScale=0.3.
+
+### Tóm tắt trung bình 26 datasets
+
+| Config | Acc | ΔAcc | F1 macro | ΔF1 | Recall macro | ΔRecall |
+|---|---:|---:|---:|---:|---:|---:|
+| **topK=0** (vote tất cả) ⭐ | 85.47% | — | **0.8284** | — | **0.8348** | — |
+| topK=5 | 85.35% | -0.12 | 0.8205 | **-0.0079** | 0.8222 | **-0.0126** |
+| topK=7 | 85.50% | +0.03 | 0.8267 | -0.0016 | 0.8305 | -0.0043 |
+| topK=10 | 85.57% | +0.10 | 0.8286 | +0.0002 | 0.8339 | -0.0009 |
+
+→ **Kết luận**: topK=10 tăng Acc nhẹ (+0.10) nhưng **F1 hòa (+0.0002), Recall hơi giảm (-0.0009)**. topK=5/7 đều giảm F1/Recall. → **topK=0 (vote tất cả) tốt nhất cho F1+Recall** — em dùng topK=0 làm cấu hình chính.
+
+### ΔF1 từng dataset (so với topK=0)
+
+| Dataset (tiếng Việt) | F1 topK=0 | ΔF1(5) | ΔF1(7) | ΔF1(10) |
+|---|---:|---:|---:|---:|
+| Anneal — Ủ kim loại | 0.9575 | +0.0007 | -0.0003 | -0.0055 |
+| Australian — Thẻ TD Úc | 0.8588 | +0.0015 | -0.0001 | +0.0029 |
+| Auto — Ô tô | 0.7902 | -0.0263 | -0.0065 | **+0.0214** |
+| Breast-Cancer — Ung thư vú | 0.9711 | +0.0016 | -0.0016 | -0.0016 |
+| Cleve — Tim Cleveland | 0.8187 | -0.0033 | +0.0069 | +0.0035 |
+| Crx — Thẻ tín dụng | 0.8522 | +0.0094 | +0.0044 | -0.0055 |
+| Diabetes — Tiểu đường | 0.6839 | +0.0012 | +0.0044 | +0.0000 |
+| German — TD Đức | 0.6821 | **-0.0368** | -0.0188 | -0.0048 |
+| Glass — Thủy tinh | 0.6450 | -0.0221 | +0.0000 | +0.0000 |
+| Heart — Bệnh tim | 0.8066 | -0.0266 | -0.0231 | -0.0076 |
+| Hepatitis — Viêm gan | 0.7647 | **-0.1084** | -0.0450 | +0.0002 |
+| Horse — Ngựa (colic) | 0.8177 | +0.0228 | +0.0037 | -0.0009 |
+| Hypo — Suy giáp | 0.9484 | +0.0055 | +0.0058 | +0.0043 |
+| Iono — Tầng điện ly | 0.9178 | -0.0124 | -0.0106 | -0.0036 |
+| Iris — Hoa diên vĩ | 0.9325 | +0.0000 | +0.0000 | +0.0000 |
+| Labor — Lao động | 0.8736 | -0.0111 | -0.0060 | +0.0000 |
+| Led7 — LED 7 đoạn | 0.7183 | +0.0000 | +0.0000 | +0.0000 |
+| Lymphography — Bạch huyết | 0.7382 | -0.0066 | **+0.0433** | -0.0072 |
+| Pima — Tiểu đường Pima | 0.6839 | +0.0012 | +0.0044 | +0.0000 |
+| Sick — Tuyến giáp | 0.8827 | -0.0027 | -0.0032 | +0.0001 |
+| Sonar — Sóng âm | 0.8011 | -0.0050 | -0.0052 | +0.0051 |
+| Tic-Tac-Toe — Cờ ca-rô | 0.9860 | +0.0081 | +0.0081 | +0.0000 |
+| Vehicle — Loại xe | 0.7030 | -0.0118 | -0.0137 | -0.0020 |
+| Waveform — Dạng sóng | 0.8435 | -0.0092 | -0.0029 | -0.0047 |
+| Wine — Rượu vang | 0.9574 | +0.0099 | +0.0047 | +0.0052 |
+| Zoo — Động vật | 0.9026 | +0.0155 | +0.0087 | +0.0068 |
+| **TRUNG BÌNH** | **0.8284** | **-0.0079** | **-0.0016** | **+0.0002** |
+
+### ΔRecall từng dataset (so với topK=0)
+
+| Dataset (tiếng Việt) | Recall topK=0 | ΔR(5) | ΔR(7) | ΔR(10) |
+|---|---:|---:|---:|---:|
+| Anneal — Ủ kim loại | 0.9664 | -0.0129 | -0.0132 | -0.0088 |
+| Australian — Thẻ TD Úc | 0.8589 | +0.0014 | -0.0003 | +0.0029 |
+| Auto — Ô tô | 0.7989 | -0.0264 | -0.0016 | **+0.0243** |
+| Breast-Cancer — Ung thư vú | 0.9738 | +0.0021 | -0.0021 | -0.0021 |
+| Cleve — Tim Cleveland | 0.8193 | -0.0034 | +0.0072 | +0.0036 |
+| Crx — Thẻ tín dụng | 0.8505 | +0.0098 | +0.0050 | -0.0048 |
+| Diabetes — Tiểu đường | 0.6766 | +0.0010 | +0.0039 | +0.0000 |
+| German — TD Đức | 0.6929 | **-0.0565** | -0.0358 | -0.0148 |
+| Glass — Thủy tinh | 0.6830 | -0.0277 | +0.0000 | +0.0000 |
+| Heart — Bệnh tim | 0.8083 | -0.0250 | -0.0216 | -0.0066 |
+| Hepatitis — Viêm gan | 0.7788 | **-0.1387** | -0.0548 | -0.0048 |
+| Horse — Ngựa (colic) | 0.8231 | +0.0108 | -0.0019 | -0.0031 |
+| Hypo — Suy giáp | 0.9543 | -0.0057 | -0.0025 | -0.0027 |
+| Iono — Tầng điện ly | 0.9108 | -0.0180 | -0.0125 | -0.0044 |
+| Iris — Hoa diên vĩ | 0.9333 | +0.0000 | +0.0000 | +0.0000 |
+| Labor — Lao động | 0.8875 | -0.0250 | -0.0125 | +0.0000 |
+| Led7 — LED 7 đoạn | 0.7268 | +0.0000 | +0.0000 | +0.0000 |
+| Lymphography — Bạch huyết | 0.7397 | -0.0052 | **+0.0420** | -0.0083 |
+| Pima — Tiểu đường Pima | 0.6766 | +0.0010 | +0.0039 | +0.0000 |
+| Sick — Tuyến giáp | 0.9077 | -0.0108 | -0.0082 | -0.0025 |
+| Sonar — Sóng âm | 0.8026 | -0.0035 | -0.0045 | +0.0050 |
+| Tic-Tac-Toe — Cờ ca-rô | 0.9861 | +0.0063 | +0.0063 | +0.0000 |
+| Vehicle — Loại xe | 0.7154 | -0.0081 | -0.0117 | -0.0011 |
+| Waveform — Dạng sóng | 0.8438 | -0.0089 | -0.0027 | -0.0045 |
+| Wine — Rượu vang | 0.9602 | +0.0083 | +0.0028 | +0.0056 |
+| Zoo — Động vật | 0.9300 | +0.0071 | +0.0036 | +0.0036 |
+| **TRUNG BÌNH** | **0.8348** | **-0.0126** | **-0.0043** | **-0.0009** |
+
+### Nhận xét Top-K
+- **topK=5 hại nặng** một số bộ: Hepatitis (F1 -0.108, Recall -0.139), German (F1 -0.037, Recall -0.057) → cắt quá nhiều luật làm mất lớp ít mẫu.
+- **topK=10** chỉ giúp Auto (F1 +0.021, Recall +0.024) nhưng hại Anneal, Heart, Waveform → tổng gần như không đổi.
+- → **Không nên dùng Top-K** (topK=0 vote tất cả là tốt nhất cho F1+Recall). Đây là lý do cấu hình chính của em **KHÔNG dùng Top-K**.
+
+---
+
 ## 6. CẤU HÌNH CHẠY (tái lập)
 
 ```bash
