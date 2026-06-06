@@ -223,6 +223,63 @@ public class CMARClassifier {
         return bestClass;
     }
 
+    /**
+     * Weighted fuzzy inference: items may include fuzzy-secondary bin items; itemWeights[k] is the
+     * membership weight of instance[k] (1.0 for primary/categorical, w2&lt;0.5 for fuzzy-secondary).
+     * Each matched rule's vote is scaled by the product of the membership weights of the instance
+     * items its antecedent uses → wrong-bin (low-membership) matches are damped, so clean crisp
+     * mining keeps a noise-free rule base while borderline test instances still recover minority
+     * rules. Returns the same as predict(instance) when itemWeights is null.
+     */
+    public int predict(int[] instance, double[] itemWeights) {
+        if (!fitted) throw new IllegalStateException("Not fitted");
+        if (itemWeights == null) return predict(instance);
+
+        // Map instance item -> membership weight (only entries that differ from 1.0 matter)
+        Map<Integer, Double> w = new HashMap<>();
+        for (int k = 0; k < instance.length; k++) {
+            if (itemWeights[k] < 1.0) w.put(instance[k], itemWeights[k]);
+        }
+
+        long[] bitmap = borrowInstanceBitmap(instance);
+        List<Rule> allMatched = crTree.findAllMatching(bitmap);
+        if (allMatched.isEmpty()) return defaultClass;
+        Collections.sort(allMatched);
+
+        // Weighted group voting (no unanimity short-circuit — avoids fuzzy-secondary pollution)
+        Map<Integer, Double> classScores = new HashMap<>();
+        int limit = allMatched.size();
+        if (topKGlobal > 0) limit = Math.min(limit, topKGlobal);
+        for (int i = 0; i < limit; i++) {
+            Rule r = allMatched.get(i);
+            double scale = 1.0;
+            for (int item : r.getAntecedent()) {
+                Double wi = w.get(item);
+                if (wi != null) scale *= wi;
+            }
+            classScores.merge(r.classLabel, r.weight * scale, Double::sum);
+        }
+
+        // Cost-sensitive scaling (same as crisp path)
+        if (useCostSensitive && Rule.CLASS_FREQS != null && Rule.TOTAL_N > 0 && !Rule.CLASS_FREQS.isEmpty()) {
+            int maxFreq = Integer.MIN_VALUE, minFreq = Integer.MAX_VALUE;
+            for (int f : Rule.CLASS_FREQS.values()) { if (f > maxFreq) maxFreq = f; if (f < minFreq && f > 0) minFreq = f; }
+            if (minFreq > 0 && (double) maxFreq / minFreq > imbalanceThreshold) {
+                for (Map.Entry<Integer, Double> e : new HashMap<>(classScores).entrySet()) {
+                    int freq = Rule.CLASS_FREQS.getOrDefault(e.getKey(), Rule.TOTAL_N);
+                    classScores.put(e.getKey(), e.getValue() * ((double) Rule.TOTAL_N / Math.max(1, freq)));
+                }
+            }
+        }
+
+        int bestClass = defaultClass;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (Map.Entry<Integer, Double> e : classScores.entrySet()) {
+            if (e.getValue() > bestScore) { bestScore = e.getValue(); bestClass = e.getKey(); }
+        }
+        return bestClass;
+    }
+
     public int[] predict(int[][] instances) {
         int[] predictions = new int[instances.length];
         for (int i = 0; i < instances.length; i++) {

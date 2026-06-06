@@ -92,6 +92,7 @@ public class BoostedBenchmarkRunner {
                 cmar.benchmark.DataLoader.FUZZY_TRAIN = false;
                 cmar.benchmark.DataLoader.FUZZY_TEST = true;
             }
+            if (a.equalsIgnoreCase("--fuzzyWeighted")) cmar.benchmark.DataLoader.FUZZY_WEIGHTED_INFER = true;
             if (a.equalsIgnoreCase("--fuzzyTrainOnly")) {
                 cmar.benchmark.DataLoader.FUZZY = true;
                 cmar.benchmark.DataLoader.FUZZY_TRAIN = true;
@@ -167,10 +168,12 @@ public class BoostedBenchmarkRunner {
 
             int[][] trainData, testData;
             int[] trainLabels, testLabels;
+            double[][] testWeights = null;
             if (ds.rawData != null) {
                 DataLoader.FoldData fold = DataLoader.encodeFold(ds.rawData, trainArr, testArr);
                 trainData = fold.trainTx; trainLabels = fold.trainLabels;
                 testData = fold.testTx;   testLabels = fold.testLabels;
+                testWeights = fold.testItemWeights;
             } else {
                 trainData = new int[trainIdx.size()][]; trainLabels = new int[trainIdx.size()];
                 for (int i = 0; i < trainIdx.size(); i++) {
@@ -213,7 +216,8 @@ public class BoostedBenchmarkRunner {
                 bag.setSeed(42 + f);
                 bag.setBootstrapRatio(BOOTSTRAP_RATIO);
                 bag.fit(trainData, trainLabels);
-                m = bag.scoreFull(testData, testLabels);
+                m = (testWeights != null) ? bag.scoreFull(testData, testWeights, testLabels)
+                                          : bag.scoreFull(testData, testLabels);
                 rounds = bag.getEnsembleSize();
                 rules = bag.getTotalRules();
             } else if (METHOD.equals("bayesian")) {

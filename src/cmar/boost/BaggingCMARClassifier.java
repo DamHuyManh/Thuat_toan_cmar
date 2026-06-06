@@ -166,6 +166,30 @@ public class BaggingCMARClassifier {
 
     public Metrics scoreFull(int[][] X, int[] y) { return Metrics.compute(predict(X), y); }
 
+    /** Weighted fuzzy inference: each base classifier votes via its weighted predict (assumes fs=1.0). */
+    public int predict(int[] x, double[] itemWeights) {
+        if (classifiers.isEmpty()) return defaultClass;
+        if (itemWeights == null) return predict(x);
+        Map<Integer, Double> votes = new HashMap<>();
+        for (int t = 0; t < classifiers.size(); t++) {
+            int pred = classifiers.get(t).predict(x, itemWeights);
+            votes.merge(pred, weights.get(t), Double::sum);
+        }
+        int best = defaultClass;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (Map.Entry<Integer, Double> e : votes.entrySet()) {
+            if (e.getValue() > bestScore) { bestScore = e.getValue(); best = e.getKey(); }
+        }
+        return best;
+    }
+
+    public Metrics scoreFull(int[][] X, double[][] itemWeights, int[] y) {
+        if (itemWeights == null) return scoreFull(X, y);
+        int[] preds = new int[X.length];
+        for (int i = 0; i < X.length; i++) preds[i] = predict(X[i], itemWeights[i]);
+        return Metrics.compute(preds, y);
+    }
+
     public int getEnsembleSize() { return classifiers.size(); }
     public int getTotalRules() { int s = 0; for (CMARClassifier c : classifiers) s += c.getRuleCount(); return s; }
     public void setSeed(long s) { this.seed = s; }

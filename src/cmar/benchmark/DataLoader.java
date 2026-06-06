@@ -415,6 +415,8 @@ public class DataLoader {
         public final int[][] testTx;
         public final int[] trainLabels;
         public final int[] testLabels;
+        /** Membership weight per test item (parallel to testTx); null unless weighted fuzzy inference. */
+        public double[][] testItemWeights;
 
         public FoldData(int[][] trainTx, int[][] testTx, int[] trainLabels, int[] testLabels) {
             this.trainTx = trainTx;
@@ -423,6 +425,9 @@ public class DataLoader {
             this.testLabels = testLabels;
         }
     }
+
+    /** Weighted fuzzy inference: train crisp, test fuzzy-expanded with per-item membership weights. */
+    public static boolean FUZZY_WEIGHTED_INFER = false;
 
     /**
      * Parse CSV to RawData without applying MDL discretization.
@@ -635,15 +640,78 @@ public class DataLoader {
             totalOffset += numValues[a];
         }
 
-        int[][] trainTx = encodeRows(raw, trainIdx, offsets, numValues, cutPoints, medians, FUZZY && FUZZY_TRAIN);
-        int[][] testTx  = encodeRows(raw, testIdx,  offsets, numValues, cutPoints, medians, FUZZY && FUZZY_TEST);
+        int[][] trainTx, testTx;
+        double[][] testWeights = null;
+        if (FUZZY_WEIGHTED_INFER) {
+            // Train crisp (clean rule base); test fuzzy-expanded with per-item membership weights.
+            trainTx = encodeRows(raw, trainIdx, offsets, numValues, cutPoints, medians, false);
+            double[][][] tw = new double[1][][];
+            testTx = encodeRowsWeighted(raw, testIdx, offsets, numValues, cutPoints, medians, tw);
+            testWeights = tw[0];
+        } else {
+            trainTx = encodeRows(raw, trainIdx, offsets, numValues, cutPoints, medians, FUZZY && FUZZY_TRAIN);
+            testTx  = encodeRows(raw, testIdx,  offsets, numValues, cutPoints, medians, FUZZY && FUZZY_TEST);
+        }
 
         int[] trainLabels = new int[trainIdx.length];
         for (int i = 0; i < trainIdx.length; i++) trainLabels[i] = raw.labels[trainIdx[i]];
         int[] testLabels = new int[testIdx.length];
         for (int i = 0; i < testIdx.length; i++) testLabels[i] = raw.labels[testIdx[i]];
 
-        return new FoldData(trainTx, testTx, trainLabels, testLabels);
+        FoldData fd = new FoldData(trainTx, testTx, trainLabels, testLabels);
+        fd.testItemWeights = testWeights;
+        return fd;
+    }
+
+    /**
+     * Fuzzy test encoding that ALSO emits a parallel membership weight per item.
+     * Primary bin item weight = 1.0; fuzzy-secondary bin item weight = w2 (its membership).
+     * Categorical items = 1.0. Used by weighted fuzzy inference (train stays crisp).
+     */
+    private static int[][] encodeRowsWeighted(RawData raw, int[] indices, int[] offsets,
+                                               int[] numValues, List<Double>[] cutPoints, double[] medians,
+                                               double[][][] weightsOut) {
+        int numAttrs = raw.numAttrs;
+        double[][] centers = new double[numAttrs][];
+        for (int a = 0; a < numAttrs; a++) {
+            if (raw.isNumeric[a] && !raw.treatAsCat[a] && cutPoints[a].size() >= 1) {
+                centers[a] = cmar.FuzzyDiscretizer.centers(cutPoints[a]);
+            }
+        }
+        int[][] items = new int[indices.length][];
+        double[][] weights = new double[indices.length][];
+        int[] ibuf = new int[numAttrs * 2];
+        double[] wbuf = new double[numAttrs * 2];
+        for (int i = 0; i < indices.length; i++) {
+            int row = indices[i];
+            int len = 0;
+            for (int a = 0; a < numAttrs; a++) {
+                String val = raw.rawVals[row][a];
+                if (raw.isNumeric[a] && !raw.treatAsCat[a]) {
+                    double v = val.equals("MISS") ? medians[a] : Double.parseDouble(val);
+                    if (centers[a] != null) {
+                        cmar.FuzzyDiscretizer.FuzzyBins fb = cmar.FuzzyDiscretizer.fuzzify(v, centers[a]);
+                        int b1 = Math.min(fb.bin1, numValues[a] - 1);
+                        ibuf[len] = offsets[a] + b1; wbuf[len] = 1.0; len++;   // primary = full weight
+                        if (fb.bin2 >= 0 && fb.w2 > FUZZY_TAU) {
+                            int b2 = Math.min(fb.bin2, numValues[a] - 1);
+                            if (b2 != b1) { ibuf[len] = offsets[a] + b2; wbuf[len] = fb.w2; len++; } // secondary = w2
+                        }
+                    } else {
+                        int bin = 0;
+                        for (double cp : cutPoints[a]) { if (v > cp) bin++; else break; }
+                        ibuf[len] = offsets[a] + Math.min(bin, numValues[a] - 1); wbuf[len] = 1.0; len++;
+                    }
+                } else {
+                    Integer catIdx = raw.catMaps[a] != null ? raw.catMaps[a].get(val) : null;
+                    ibuf[len] = offsets[a] + (catIdx != null ? catIdx : 0); wbuf[len] = 1.0; len++;
+                }
+            }
+            items[i] = java.util.Arrays.copyOf(ibuf, len);
+            weights[i] = java.util.Arrays.copyOf(wbuf, len);
+        }
+        weightsOut[0] = weights;
+        return items;
     }
 
     private static int[][] encodeRows(RawData raw, int[] indices, int[] offsets,
