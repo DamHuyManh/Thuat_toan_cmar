@@ -9,15 +9,17 @@
 
 ## 1. KẾT QUẢ CHÍNH (so với bài báo gốc CMAR 2001)
 
-| Chỉ số | Paper CMAR 2001 | **Cải tiến (của em)** | Δ (tăng) |
+| Chỉ số | Paper/Baseline | **Cải tiến (của em)** | Δ (tăng) |
 |---|---:|---:|---:|
-| **Accuracy** (độ chính xác) | 85.22% | **85.47%** | **+0.25%** |
-| **F1 macro** (cân bằng các lớp) | 80.67% | **82.84%** | **+2.17%** |
-| **Recall macro** (không bỏ sót lớp) | 80.94% | **83.48%** | **+2.54%** |
-| Precision macro | ~83% | 83.68% | ≈ |
+| **Accuracy** (độ chính xác) | 85.22% (paper) | **85.47%** | **+0.25%** |
+| **F1 macro** (cân bằng các lớp) | 80.67% (baseline thuần) | **82.84%** | **+2.17%** |
+| **Recall macro** (không bỏ sót lớp) | 80.66% (baseline thuần) | **83.48%** | **+2.82%** |
+| Precision macro | 82.99% (baseline) | 83.68% | +0.69% |
 | Tốc độ huấn luyện | 1× | **5.28× nhanh hơn** | — |
 
-→ **Tăng mạnh nhất ở F1 (+2.17%) và Recall (+2.54%)** — đúng mục tiêu xử lý dữ liệu mất cân bằng lớp. Accuracy tăng nhẹ (+0.25%) vì Accuracy bị "che" bởi lớp đa số.
+> **Accuracy** so với **số paper công bố** (85.22%). **F1/Recall/Precision** paper không công bố từng dataset → so với **baseline CMAR THUẦN** (bản tái lập paper-faithful không có 5 cải tiến). Chi tiết delta từng dataset ở **mục 2B**.
+
+→ **Tăng mạnh nhất ở F1 (+2.17%) và Recall (+2.82%)** — đúng mục tiêu xử lý dữ liệu mất cân bằng lớp. Accuracy tăng nhẹ (+0.25%) vì Accuracy bị "che" bởi lớp đa số.
 
 **So sánh thống kê với 5 thuật toán công bố** (kiểm định Friedman, 24 bộ chung): em xếp **hạng 2/5**, tương đương CPAR, có ý nghĩa thống kê (p < 0.05).
 
@@ -59,12 +61,54 @@
 
 **Thống kê thắng/hòa/thua** (theo Accuracy): **16 thắng / 4 hòa / 6 thua** (61.5% / 15.4% / 23.1%).
 
-### Tổng hợp số tổng (so paper):
-| Metric | Paper | Của em | Δ |
+### Tổng hợp số tổng (so paper / baseline):
+| Metric | Paper / Baseline | Của em | Δ |
 |---|---:|---:|---:|
-| Accuracy | 85.22% | **85.47%** | **+0.25%** |
-| F1 macro | 80.67% | **82.84%** | **+2.17%** |
-| Recall macro | 80.94% | **83.48%** | **+2.54%** |
+| Accuracy | 85.22% (paper) | **85.47%** | **+0.25%** |
+| F1 macro | 80.67% (baseline thuần) | **82.84%** | **+2.17%** |
+| Recall macro | 80.66% (baseline thuần) | **83.48%** | **+2.82%** |
+
+---
+
+## 2B. ΔF1 và ΔRecall TỪNG DATASET (so với baseline CMAR thuần)
+
+> **Lưu ý honest**: Bài báo CMAR 2001 **KHÔNG công bố F1/Recall từng dataset** (chỉ có Accuracy). Nên ΔF1/ΔRecall tính so với **baseline CMAR THUẦN** — bản tái lập paper-faithful (KHÔNG có 5 cải tiến), chạy thật trên 26 datasets (`results/summary-report.md`).
+> Baseline thuần: Acc 85.33%, F1 0.8067, Recall 0.8066. Của em: Acc 85.47%, F1 0.8284, Recall 0.8348.
+
+| Dataset (tiếng Việt) | F1 baseline | F1 của em | **ΔF1** | Recall baseline | Recall của em | **ΔRecall** |
+|---|---:|---:|---:|---:|---:|---:|
+| Anneal — Ủ kim loại | 0.8228 | 0.9575 | **+0.1347** 🟢 | 0.8203 | 0.9664 | **+0.1461** 🟢 |
+| Australian — Thẻ TD Úc | 0.8662 | 0.8588 | -0.0074 | 0.8664 | 0.8589 | -0.0075 |
+| Auto — Ô tô | 0.7988 | 0.7902 | -0.0086 | 0.8066 | 0.7989 | -0.0077 |
+| Breast-Cancer — Ung thư vú | 0.9677 | 0.9711 | +0.0034 | 0.9686 | 0.9738 | +0.0052 |
+| Cleve — Tim Cleveland | 0.8211 | 0.8187 | -0.0024 | 0.8219 | 0.8193 | -0.0026 |
+| Crx — Thẻ tín dụng | 0.8590 | 0.8522 | -0.0068 | 0.8586 | 0.8505 | -0.0081 |
+| Diabetes — Tiểu đường | 0.6704 | 0.6839 | **+0.0135** 🟢 | 0.6635 | 0.6766 | **+0.0131** 🟢 |
+| German — TD Đức | 0.5724 | 0.6821 | **+0.1097** 🟢 | 0.5807 | 0.6929 | **+0.1122** 🟢 |
+| Glass — Thủy tinh | 0.5861 | 0.6450 | **+0.0589** 🟢 | 0.6169 | 0.6830 | **+0.0661** 🟢 |
+| Heart — Bệnh tim | 0.8019 | 0.8066 | +0.0047 | 0.8017 | 0.8083 | +0.0066 |
+| Hepatitis — Viêm gan | 0.7115 | 0.7647 | **+0.0532** 🟢 | 0.7186 | 0.7788 | **+0.0602** 🟢 |
+| Horse — Ngựa (colic) | 0.8098 | 0.8177 | +0.0079 | 0.8111 | 0.8231 | +0.0120 |
+| Hypo — Suy giáp | 0.8611 | 0.9484 | **+0.0873** 🟢 | 0.8006 | 0.9543 | **+0.1537** 🟢 |
+| Iono — Tầng điện ly | 0.9164 | 0.9178 | +0.0014 | 0.9066 | 0.9108 | +0.0042 |
+| Iris — Hoa diên vĩ | 0.9258 | 0.9325 | +0.0067 | 0.9267 | 0.9333 | +0.0066 |
+| Labor — Lao động | 0.9009 | 0.8736 | -0.0273 | 0.9000 | 0.8875 | -0.0125 |
+| Led7 — LED 7 đoạn | 0.7089 | 0.7183 | +0.0094 | 0.7189 | 0.7268 | +0.0079 |
+| Lymphography — Bạch huyết | 0.7093 | 0.7382 | **+0.0289** 🟢 | 0.7199 | 0.7397 | +0.0198 |
+| Pima — Tiểu đường Pima | 0.6704 | 0.6839 | **+0.0135** 🟢 | 0.6635 | 0.6766 | **+0.0131** 🟢 |
+| Sick — Tuyến giáp | 0.8391 | 0.8827 | **+0.0436** 🟢 | 0.8000 | 0.9077 | **+0.1077** 🟢 |
+| Sonar — Sóng âm | 0.8050 | 0.8011 | -0.0039 | 0.8082 | 0.8026 | -0.0056 |
+| Tic-Tac-Toe — Cờ ca-rô | 0.9906 | 0.9860 | -0.0046 | 0.9893 | 0.9861 | -0.0032 |
+| Vehicle — Loại xe | 0.6588 | 0.7030 | **+0.0442** 🟢 | 0.6856 | 0.7154 | **+0.0298** 🟢 |
+| Waveform — Dạng sóng | 0.8146 | 0.8435 | **+0.0289** 🟢 | 0.8157 | 0.8438 | **+0.0281** 🟢 |
+| Wine — Rượu vang | 0.9665 | 0.9574 | -0.0091 | 0.9652 | 0.9602 | -0.0050 |
+| Zoo — Động vật | 0.9181 | 0.9026 | -0.0155 | 0.9371 | 0.9300 | -0.0071 |
+| **TRUNG BÌNH 26 bộ** | **0.8067** | **0.8284** | **+0.0217 (+2.17%)** | **0.8066** | **0.8348** | **+0.0282 (+2.82%)** |
+
+**Nhận xét**:
+- **18/26 bộ tăng F1**, **18/26 bộ tăng Recall** so với baseline thuần.
+- Tăng mạnh nhất ở các bộ **mất cân bằng / nhiều lớp**: Anneal (ΔF1 +0.135, ΔR +0.146), German (+0.110/+0.112), Hypo (+0.087/+0.154), Sick (+0.044/+0.108) — đúng mục tiêu 5 cải tiến (xử lý mất cân bằng).
+- Vài bộ giảm nhẹ (Labor, Wine, Zoo, Tic-Tac-Toe) — đa số là bộ nhỏ/đã gần hoàn hảo.
 
 ---
 

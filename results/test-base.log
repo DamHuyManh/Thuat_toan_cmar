@@ -1,0 +1,34 @@
+=== Boosted CMAR Benchmark — T=1 stratified=0 costSensitive=false ===
+
+  Loading Anneal... real data (898 rows)
+  Loading Australian... real data (690 rows)
+  Loading Auto... real data (205 rows)
+  Loading Breast-Cancer... real data (683 rows)
+  Loading Cleve... real data (303 rows)
+  Loading Crx... real data (690 rows)
+  Loading Diabetes... real data (768 rows)
+  Loading German... real data (1000 rows)
+  Loading Glass... real data (214 rows)
+  Loading Heart... real data (270 rows)
+  Loading Hepatitis... real data (155 rows)
+  Loading Horse... real data (368 rows)
+  Loading Hypo... real data (3163 rows)
+  Loading Iono... real data (351 rows)
+  Loading Iris... real data (150 rows)
+  Loading Labor... real data (57 rows)
+  Loading Led7... real data (3200 rows)
+  Loading Lymphography... real data (148 rows)
+  Loading Pima... real data (768 rows)
+  Loading Sick... real data (2800 rows)
+  Loading Sonar... real data (208 rows)
+  Loading Tic-Tac-Toe... real data (958 rows)
+  Loading Vehicle... real data (846 rows)
+  Loading Waveform... real data (5000 rows)
+  Loading Wine... real data (178 rows)
+  Loading Zoo... real data (101 rows)
+Running: Diabetes ...
+  Done: acc=0.7396 F1=0.6764 R=0.6693 (paper=75.80%) rounds_avg=1.0
+Running: Iris ...
+  Done: acc=0.9333 F1=0.9325 R=0.9333 (paper=94.00%) rounds_avg=1.0
+
+Report: results/test-base.md

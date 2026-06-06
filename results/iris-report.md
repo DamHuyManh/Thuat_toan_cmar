@@ -51,5 +51,5 @@
 | Avg Training Time | 0 ms |
 | Avg Prediction Time | 0 ms |
 | Avg Rules Mined | 90 |
-| Avg Rules After Pruning | 38 |
-| Pruning Ratio | 57.8% |
+| Avg Rules After Pruning | 30 |
+| Pruning Ratio | 66.7% |
