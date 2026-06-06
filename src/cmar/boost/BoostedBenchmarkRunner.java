@@ -92,6 +92,7 @@ public class BoostedBenchmarkRunner {
                 cmar.benchmark.DataLoader.FUZZY_TRAIN = false;
                 cmar.benchmark.DataLoader.FUZZY_TEST = true;
             }
+            if (a.equalsIgnoreCase("--balancedBag")) BaggingCMARClassifier.BALANCED = true;
             if (a.equalsIgnoreCase("--fuzzyWeighted")) cmar.benchmark.DataLoader.FUZZY_WEIGHTED_INFER = true;
             if (a.equalsIgnoreCase("--fuzzyTrainOnly")) {
                 cmar.benchmark.DataLoader.FUZZY = true;

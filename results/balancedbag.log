@@ -1,0 +1,69 @@
+=== Boosted CMAR Benchmark — T=10 stratified=10 costSensitive=true ===
+
+  Loading Anneal... real data (898 rows)
+  Loading Australian... real data (690 rows)
+  Loading Auto... real data (205 rows)
+  Loading Breast-Cancer... real data (683 rows)
+  Loading Cleve... real data (303 rows)
+  Loading Crx... real data (690 rows)
+  Loading Diabetes... real data (768 rows)
+  Loading German... real data (1000 rows)
+  Loading Glass... real data (214 rows)
+  Loading Heart... real data (270 rows)
+  Loading Hepatitis... real data (155 rows)
+  Loading Horse... real data (368 rows)
+  Loading Hypo... real data (3163 rows)
+  Loading Iono... real data (351 rows)
+  Loading Iris... real data (150 rows)
+  Loading Labor... real data (57 rows)
+  Loading Led7... real data (3200 rows)
+  Loading Lymphography... real data (148 rows)
+  Loading Pima... real data (768 rows)
+  Loading Sick... real data (2800 rows)
+  Loading Sonar... real data (208 rows)
+  Loading Tic-Tac-Toe... real data (958 rows)
+  Loading Vehicle... real data (846 rows)
+  Loading Waveform... real data (5000 rows)
+  Loading Wine... real data (178 rows)
+  Loading Zoo... real data (101 rows)
+Running: Anneal ...
+  Done: acc=0.9788 F1=0.9352 R=0.9580 (paper=97.30%) rounds_avg=10.0
+Running: Australian ...
+  Done: acc=0.8608 F1=0.8588 R=0.8589 (paper=86.10%) rounds_avg=10.0
+Running: Auto ...
+  Done: acc=0.8212 F1=0.8236 R=0.8357 (paper=78.10%) rounds_avg=10.0
+Running: Breast-Cancer ...
+  Done: acc=0.9663 F1=0.9630 R=0.9652 (paper=96.40%) rounds_avg=10.0
+Running: Cleve ...
+  Done: acc=0.8223 F1=0.8187 R=0.8193 (paper=82.20%) rounds_avg=10.0
+Running: Crx ...
+  Done: acc=0.8555 F1=0.8522 R=0.8505 (paper=84.90%) rounds_avg=10.0
+Running: Diabetes ...
+  Done: acc=0.7358 F1=0.7194 R=0.7289 (paper=75.80%) rounds_avg=10.0
+Running: German ...
+  Done: acc=0.7230 F1=0.6757 R=0.6802 (paper=74.90%) rounds_avg=10.0
+Running: Glass ...
+  Done: acc=0.6591 F1=0.6120 R=0.6608 (paper=70.10%) rounds_avg=10.0
+Running: Heart ...
+  Done: acc=0.8111 F1=0.8066 R=0.8083 (paper=82.20%) rounds_avg=10.0
+Running: Hepatitis ...
+  Done: acc=0.8166 F1=0.7462 R=0.7577 (paper=80.50%) rounds_avg=10.0
+Running: Horse ...
+  Done: acc=0.8316 F1=0.8198 R=0.8223 (paper=82.60%) rounds_avg=10.0
+Running: Hypo ...
+  Done: acc=0.9848 F1=0.9230 R=0.9483 (paper=98.40%) rounds_avg=10.0
+Running: Iono ...
+  Done: acc=0.9231 F1=0.9148 R=0.9086 (paper=91.50%) rounds_avg=10.0
+Running: Iris ...
+  Done: acc=0.9333 F1=0.9325 R=0.9333 (paper=94.00%) rounds_avg=10.0
+Running: Labor ...
+  Done: acc=0.8933 F1=0.8737 R=0.8750 (paper=89.70%) rounds_avg=10.0
+Running: Led7 ...
+  Done: acc=0.7291 F1=0.7183 R=0.7268 (paper=72.50%) rounds_avg=10.0
+Running: Lymphography ...
+  Done: acc=0.8232 F1=0.7609 R=0.7644 (paper=83.10%) rounds_avg=10.0
+Running: Pima ...
+  Done: acc=0.7358 F1=0.7194 R=0.7289 (paper=75.10%) rounds_avg=10.0
+Running: Sick ...
+  Done: acc=0.9639 F1=0.8628 R=0.9094 (paper=97.50%) rounds_avg=10.0
+Running: Sonar ...

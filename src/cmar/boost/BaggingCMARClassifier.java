@@ -60,6 +60,11 @@ public class BaggingCMARClassifier {
         this.featureSubsetRatio = featureSubsetRatio;
     }
 
+    /** OverBagging (Wang &amp; Yao 2009): class-balanced bootstrap — oversample minority per bag.
+     *  Only activates on imbalanced data (max/min class freq &gt; threshold); no-op when balanced. */
+    public static boolean BALANCED = false;
+    public static double BALANCE_THRESHOLD = 1.5;
+
     public void fit(int[][] X, int[] y) {
         int N = X.length;
         if (N == 0) return;
@@ -71,14 +76,34 @@ public class BaggingCMARClassifier {
         for (int[] tx : X) for (int it : tx) allItems.add(it);
         List<Integer> allItemsList = new ArrayList<>(allItems);
 
+        // For balanced bagging: indices grouped by class + imbalance check
+        Map<Integer, List<Integer>> byClass = new HashMap<>();
+        for (int i = 0; i < N; i++) byClass.computeIfAbsent(y[i], k -> new ArrayList<>()).add(i);
+        int maxF = 0, minF = Integer.MAX_VALUE;
+        for (List<Integer> l : byClass.values()) { maxF = Math.max(maxF, l.size()); minF = Math.min(minF, l.size()); }
+        boolean useBalanced = BALANCED && minF > 0 && (double) maxF / minF > BALANCE_THRESHOLD;
+
         for (int t = 0; t < T; t++) {
             Random rng = new Random(seed + 100L * t);
 
-            // Bootstrap sample
+            // Bootstrap sample (uniform, or class-balanced when imbalanced)
             int sampleSize = Math.max(2, (int) Math.round(N * bootstrapRatio));
             boolean[] inBag = new boolean[N];
             int[] y_t = new int[sampleSize];
-            int[][] X_t = EnsembleUtils.bootstrapSample(X, y, y_t, rng, sampleSize, inBag);
+            int[][] X_t;
+            if (useBalanced) {
+                // OverBagging: draw sampleSize total, equal share per class (oversample minority)
+                X_t = new int[sampleSize][];
+                List<Integer> classes = new ArrayList<>(byClass.keySet());
+                for (int i = 0; i < sampleSize; i++) {
+                    int c = classes.get(rng.nextInt(classes.size()));   // pick class uniformly
+                    List<Integer> pool = byClass.get(c);
+                    int idx = pool.get(rng.nextInt(pool.size()));        // sample within class
+                    X_t[i] = X[idx]; y_t[i] = y[idx]; inBag[idx] = true;
+                }
+            } else {
+                X_t = EnsembleUtils.bootstrapSample(X, y, y_t, rng, sampleSize, inBag);
+            }
 
             // Optional: subsample features
             Set<Integer> activeSet;
