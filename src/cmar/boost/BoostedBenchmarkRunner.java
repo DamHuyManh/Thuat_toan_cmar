@@ -85,7 +85,18 @@ public class BoostedBenchmarkRunner {
                 ONLY = new java.util.HashSet<>();
                 for (String s : a.substring(7).toLowerCase().split(",")) ONLY.add(s.trim());
             }
+            if (a.startsWith("--disc=")) cmar.benchmark.DataLoader.DISC_MODE = a.substring(7).toLowerCase();
             if (a.equalsIgnoreCase("--fuzzy")) cmar.benchmark.DataLoader.FUZZY = true;
+            if (a.equalsIgnoreCase("--fuzzyTestOnly")) {
+                cmar.benchmark.DataLoader.FUZZY = true;
+                cmar.benchmark.DataLoader.FUZZY_TRAIN = false;
+                cmar.benchmark.DataLoader.FUZZY_TEST = true;
+            }
+            if (a.equalsIgnoreCase("--fuzzyTrainOnly")) {
+                cmar.benchmark.DataLoader.FUZZY = true;
+                cmar.benchmark.DataLoader.FUZZY_TRAIN = true;
+                cmar.benchmark.DataLoader.FUZZY_TEST = false;
+            }
             if (a.startsWith("--fuzzyTau=")) {
                 try { cmar.benchmark.DataLoader.FUZZY_TAU = Double.parseDouble(a.substring(11)); } catch (Exception ignored) {}
             }

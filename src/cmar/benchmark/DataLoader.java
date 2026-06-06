@@ -15,6 +15,11 @@ public class DataLoader {
     public static boolean FUZZY = false;
     /** Emit the 2nd fuzzy bin item only when its membership weight exceeds this threshold. */
     public static double FUZZY_TAU = 0.35;
+    /** Discretization for continuous attrs: "mdl" (default) or "caim". */
+    public static String DISC_MODE = "mdl";
+    /** Apply fuzzy top-2 expansion on train / test side independently. */
+    public static boolean FUZZY_TRAIN = true;
+    public static boolean FUZZY_TEST = true;
 
     /**
      * Load dataset from CSV string. Handles numeric (discretize) and categorical (encode) attrs.
@@ -599,7 +604,7 @@ public class DataLoader {
                     // Equal-frequency quantile cut points from training only
                     cutPoints[a] = quantileCuts(nonMiss, raw.numBins);
                 } else {
-                    // Supervised MDL cut points from training only (numBins == 0)
+                    // Supervised cut points from training only (numBins == 0): MDL or CAIM
                     double[] vals = new double[trainIdx.length];
                     int[] lbls = new int[trainIdx.length];
                     for (int i = 0; i < trainIdx.length; i++) {
@@ -607,7 +612,9 @@ public class DataLoader {
                         vals[i] = v.equals("MISS") ? medians[a] : Double.parseDouble(v);
                         lbls[i] = raw.labels[trainIdx[i]];
                     }
-                    cutPoints[a] = cmar.MDLDiscretizer.findCutPoints(vals, lbls);
+                    cutPoints[a] = DISC_MODE.equals("caim")
+                            ? cmar.CAIMDiscretizer.findCutPoints(vals, lbls)
+                            : cmar.MDLDiscretizer.findCutPoints(vals, lbls);
                 }
             } else {
                 cutPoints[a] = Collections.emptyList();
@@ -628,8 +635,8 @@ public class DataLoader {
             totalOffset += numValues[a];
         }
 
-        int[][] trainTx = encodeRows(raw, trainIdx, offsets, numValues, cutPoints, medians);
-        int[][] testTx  = encodeRows(raw, testIdx,  offsets, numValues, cutPoints, medians);
+        int[][] trainTx = encodeRows(raw, trainIdx, offsets, numValues, cutPoints, medians, FUZZY && FUZZY_TRAIN);
+        int[][] testTx  = encodeRows(raw, testIdx,  offsets, numValues, cutPoints, medians, FUZZY && FUZZY_TEST);
 
         int[] trainLabels = new int[trainIdx.length];
         for (int i = 0; i < trainIdx.length; i++) trainLabels[i] = raw.labels[trainIdx[i]];
@@ -640,12 +647,13 @@ public class DataLoader {
     }
 
     private static int[][] encodeRows(RawData raw, int[] indices, int[] offsets,
-                                       int[] numValues, List<Double>[] cutPoints, double[] medians) {
+                                       int[] numValues, List<Double>[] cutPoints, double[] medians,
+                                       boolean fuzzy) {
         int numAttrs = raw.numAttrs;
 
-        // Precompute fuzzy bin centers per continuous attr (only when FUZZY on).
+        // Precompute fuzzy bin centers per continuous attr (only when fuzzy on).
         double[][] fuzzyCenters = null;
-        if (FUZZY) {
+        if (fuzzy) {
             fuzzyCenters = new double[numAttrs][];
             for (int a = 0; a < numAttrs; a++) {
                 if (raw.isNumeric[a] && !raw.treatAsCat[a] && cutPoints[a].size() >= 1) {
@@ -670,7 +678,7 @@ public class DataLoader {
                         else break;
                     }
                     bin = Math.min(bin, numValues[a] - 1);
-                    if (FUZZY && fuzzyCenters != null && fuzzyCenters[a] != null) {
+                    if (fuzzy && fuzzyCenters != null && fuzzyCenters[a] != null) {
                         // Fuzzy: emit top-1 membership bin + top-2 bin when borderline (w2 > tau)
                         cmar.FuzzyDiscretizer.FuzzyBins fb = cmar.FuzzyDiscretizer.fuzzify(v, fuzzyCenters[a]);
                         int b1 = Math.min(fb.bin1, numValues[a] - 1);
