@@ -1,132 +1,175 @@
-# BÁO CÁO TRÌNH BÀY — CẢI TIẾN THUẬT TOÁN CMAR
+# CHI TIẾT: CÁCH CẢI TIẾN SO VỚI CÁCH CŨ
 
-**Sinh viên thực hiện**: [Tên em]
-**Đề tài**: Cải tiến thuật toán CMAR trong phân lớp dữ liệu bằng luật kết hợp
-**Thuật toán gốc**: CMAR — Li, Han, Pei (IEEE ICDM 2001)
-
----
-
-## 1. EM ĐÃ LÀM GÌ?
-
-Em cài đặt lại thuật toán **CMAR** (phân lớp bằng luật kết hợp) và đề xuất **5 cải tiến mới** + 1 tối ưu hiệu năng, thử nghiệm trên **26 bộ dữ liệu UCI chuẩn** (giống y bài báo gốc).
+> **Đề tài**: Cải tiến hiệu năng thuật toán phân lớp luật kết hợp CMAR (Li, Han, Pei — ICDM 2001).
+> File này phân tích **TỪNG cải tiến**: cách CŨ (nhược điểm) → cách MỚI (ưu điểm) + ví dụ + công thức.
+> *Ví dụ xuyên suốt*: 100 bệnh nhân — sốt cao = 30, ho = nhiều người, cúm = 40, vừa sốt vừa cúm = 24.
 
 ---
 
-## 2. KẾT QUẢ CHÍNH
+## BỐI CẢNH: CMAR hoạt động 2 giai đoạn
 
-| Chỉ số | Bài báo gốc 2001 | **Của em** | Tăng |
-|---|---:|---:|---:|
-| **Accuracy** | 85.22% | **85.57%** | **+0.35%** |
-| **F1-macro** | 80.67% | **82.86%** | **+2.19%** |
-| **Recall-macro** | 80.94% | **83.39%** | **+2.45%** |
-| Tốc độ huấn luyện | 1× | **nhanh hơn 5.28×** | |
+1. **HỌC (train)**: từ dữ liệu → khai phá hàng nghìn **luật** (vd *sốt+ho → cúm*) → cắt tỉa bỏ luật dở → lưu lại.
+2. **DỰ ĐOÁN (test)**: mẫu mới đến → tìm luật khớp → các luật **bỏ phiếu** chọn lớp.
 
-> **Điểm nhấn**: Em tăng mạnh **F1 (+2.19%) và Recall (+2.45%)** — đây là chỉ số quan trọng cho dữ liệu **mất cân bằng lớp** (lớp ít mẫu), điều mà Accuracy đơn thuần che giấu.
-
-**So với 5 thuật toán nổi tiếng** (kiểm định thống kê Friedman): Em xếp **hạng 2/6**, tương đương phương pháp state-of-the-art ECBA-EX (2018).
+CMAR gốc làm **chậm** (đếm/lọc tốn kém) và **lọc luật ẩu** (bỏ qua bước khi quá nhiều luật). Khóa luận cải tiến **8 điểm**, chia 2 nhóm: **TỐC ĐỘ** (1–3) và **ĐỘ CHÍNH XÁC** (4–8).
 
 ---
 
-## 3. 5 CẢI TIẾN CỦA EM (giải thích ngắn)
+# NHÓM A — CẢI TIẾN TỐC ĐỘ
 
-### Cải tiến 1 — Stratified Coverage Pruning
-- **Vấn đề**: Thuật toán gốc khi lọc luật ưu tiên lớp đa số → lớp ít mẫu bị mất hết luật.
-- **Giải pháp**: Bảo vệ 10 luật tốt nhất của MỖI lớp trước khi lọc.
+## ① ĐẾM SUPPORT — cải tiến quan trọng nhất
 
-### Cải tiến 2 — Cost-Sensitive Voting (bỏ phiếu theo chi phí)
-- **Vấn đề**: Lớp nhiều mẫu có nhiều luật → luôn thắng khi bỏ phiếu.
-- **Giải pháp**: Nhân điểm lớp ít mẫu với nghịch đảo tần suất: `điểm × N/số_mẫu_lớp`.
-- **Thông minh**: chỉ áp dụng khi dữ liệu thực sự mất cân bằng (tỉ lệ > 1.5).
+**Việc cần làm**: liên tục đếm "bao nhiêu mẫu thỏa 1 tổ hợp" (vd "sốt VÀ ho") — làm HÀNG TRIỆU lần.
 
-### Cải tiến 3 — Bagging (kết hợp 10 mô hình)
-- Huấn luyện 10 mô hình CMAR trên 10 mẫu con khác nhau, rồi bỏ phiếu.
-- **Phát hiện mới**: CMAR cần DÙNG TOÀN BỘ thuộc tính (khác Random Forest) — nếu bỏ bớt thuộc tính thì giảm 3.3%.
+**❌ Cách CŨ — quét list O(N·L)**
+Duyệt từng bệnh nhân: BN1 có sốt? có ho? → BN2 → ... → BN_N.
+- N mẫu × L thuộc tính = rất nhiều thao tác → **chậm nhất trong thuật toán**.
 
-### Cải tiến 4 — Adaptive MinSup (ngưỡng hỗ trợ thích nghi)
-- Tự động hạ ngưỡng support cho lớp hiếm: `minSup / căn(tỉ lệ mất cân bằng)`.
-- Giúp mô hình tìm được luật cho lớp ít mẫu.
-
-### Cải tiến 5 — Tối ưu ngưỡng + lọc top-K
-- Hạ ngưỡng support → tìm được nhiều luật hơn cho ensemble.
-- Kết hợp lọc 10 luật mạnh nhất khi bỏ phiếu.
-
-### + Tối ưu hiệu năng (bitmap)
-- Dùng phép toán bit → nhanh hơn 64 lần → chạy đầy đủ thuật toán, không cần bỏ qua bước nào.
-
----
-
-## 4. Ý TƯỞNG XUYÊN SUỐT — "Kích hoạt thông minh"
-
-3 cải tiến chính (1, 2, 4) đều theo nguyên tắc:
-
-> **Chỉ can thiệp khi dữ liệu mất cân bằng — giữ nguyên thuật toán gốc với dữ liệu cân bằng.**
-
-→ Nhờ vậy: **tăng F1/Recall cho dữ liệu khó mà KHÔNG làm giảm Accuracy dữ liệu dễ.**
-
----
-
-## 5. EM TRUNG THỰC VỀ KẾT QUẢ
-
-- ✅ Chạy đủ **26/26 bộ dữ liệu THẬT** (không bịa số, không bỏ qua bước nào).
-- ✅ Đánh giá chuẩn: **10-fold cross-validation**, seed cố định → tái lập được.
-- ✅ Không rò rỉ dữ liệu test (rời rạc hoá học từ tập train).
-- ✅ **Thắng 16 bộ / hoà 3 / thua 7**. Em KHÔNG giấu 7 bộ thua:
-  - Các bộ y tế dữ liệu liên tục (Diabetes, Heart, Pima): giảm 1-2% do điểm yếu rời rạc hoá.
-  - Các bộ quá ít mẫu (Labor 57 mẫu, Zoo 101 mẫu): phương sai cao.
-- ✅ Em thử **16 hướng khác nhưng thất bại** (vd: Boosting, ChiMerge) — ghi nhận đầy đủ.
-
----
-
-## 6. THẮNG ĐẬM Ở ĐÂU?
-
-Em mạnh nhất trên các bộ **nhiều lớp + mất cân bằng** (đúng mục tiêu cải tiến):
-
-| Bộ dữ liệu | Bài báo | Của em | Tăng |
-|---|---:|---:|---:|
-| Hepatitis | 80.5% | 84.21% | **+3.71%** |
-| Auto | 78.1% | 81.53% | **+3.43%** |
-| Vehicle | 68.8% | 71.15% | **+2.35%** |
-| Lymphography | 83.1% | 84.69% | **+1.59%** |
-
----
-
-## 7. KIỂM ĐỊNH THỐNG KÊ (Friedman test)
-
-So sánh em với 5 thuật toán công bố trên 24 bộ dữ liệu chung:
-
-| Hạng | Thuật toán | Điểm rank (thấp = tốt) |
-|:---:|---|---:|
-| 1 | ECBA-EX (2018, mới nhất) | 1.85 |
-| **2** | **Của em** | **3.23** |
-| 3 | CPAR (2003) | 3.35 |
-| 4 | CMAR (2001, bài gốc) | 3.67 |
-| 5 | CBA (1998) | 4.19 |
-| 6 | C4.5 (1993) | 4.71 |
-
-- Kiểm định Friedman: **p < 0.05** → khác biệt có ý nghĩa thống kê.
-- Em **tương đương** thuật toán mới nhất ECBA-EX (kiểm định Nemenyi).
-
----
-
-## 8. CÁCH CHẠY THỬ (nếu cô muốn xem)
-
-```bash
-java -cp bin cmar.boost.BoostedBenchmarkRunner \
-    --method=bagging --T=10 --featureSubset=1.0 \
-    --stratified=10 --costSensitive \
-    --adaptMinSup --adaptFormula=sqrt --minSupScale=0.3 --topK=10
+**✅ Cách MỚI — Bitmap AND (64 bit/lệnh)**
+Ghi mỗi triệu chứng thành dãy bit (1=có, 0=không), mỗi bit là 1 mẫu:
 ```
-→ Ra kết quả: Accuracy 85.57%, F1 82.86%, Recall 83.39%.
+sốt = 1 0 1 1 0 1 ...      ho = 1 1 1 0 0 1 ...
+AND = 1 0 1 0 0 1 ...   → đếm bit 1 = support
+```
+Máy lưu **64 bit trong 1 ô (long)** và làm phép AND **cả 64 bit trong 1 LỆNH CPU** → xử lý **64 mẫu cùng lúc**.
+- 1000 mẫu: cách cũ ~1000 thao tác → bitmap ~16 lệnh → **nhanh ~64×**.
+
+**Công thức**: `support(A∩B) = đếm_bit_1( bitmap[A] AND bitmap[B] )`
 
 ---
 
-## 9. KẾT LUẬN
+## ② KHAI PHÁ LUẬT — chia việc nhiều lõi
 
-- Em cải tiến CMAR với **5 đóng góp mới** xoay quanh xử lý **mất cân bằng lớp**.
-- Kết quả: **+2.19% F1, +2.45% Recall** so với bài báo gốc, **tương đương thuật toán mới nhất 2018**.
-- Toàn bộ kết quả **trung thực, tái lập được**, có kiểm định thống kê.
-- Hướng phát triển: cải thiện rời rạc hoá cho dữ liệu y tế liên tục (điểm yếu hiện tại).
+**Việc cần làm**: đào ra hàng nghìn tổ hợp triệu chứng (thuật toán FP-Growth xây cây rồi đào).
+
+**❌ Cách CŨ — tuần tự**: 1 lõi CPU làm hết, đào từng nhánh một → chậm.
+
+**✅ Cách MỚI — song song (N≥200)**: mỗi nhánh gốc của cây độc lập → **chia cho nhiều lõi CPU làm cùng lúc** (ForkJoinPool).
+- Như 4 người dọn 4 phòng thay vì 1 người dọn cả 4.
+- Chỉ bật khi bộ **≥200 mẫu** (bộ nhỏ làm 1 lõi còn nhanh hơn vì khỏi tốn chi phí tạo luồng).
+- Có **tie-break tất định** → dù song song, kết quả vẫn giống hệt mọi lần chạy.
 
 ---
 
-*Báo cáo chi tiết kỹ thuật đầy đủ: xem file `BAO-CAO.md`.*
+## ③ LƯU & TÌM LUẬT — CR-tree
+
+**Việc cần làm**: khi 1 mẫu đến, tìm nhanh "luật nào khớp".
+
+**❌ Cách CŨ — List**: luật để trong danh sách dài → tìm phải **quét hết** từ đầu đến cuối.
+
+**✅ Cách MỚI — CR-tree + bitmap antecedent**:
+- **CR-tree**: lưu luật trong **cây tiền tố có băm** (như sắp sách theo kệ có nhãn) → đi theo cây lấy ngay luật khớp.
+- **Bitmap antecedent**: phần điều kiện của luật lưu dạng bit → kiểm tra khớp = **1 phép AND** (thay vì so từng triệu chứng).
+
+---
+
+# NHÓM B — CẢI TIẾN ĐỘ CHÍNH XÁC
+
+## ④ CẮT TỈA G2S — chạy ĐẦY ĐỦ ⭐ (điểm hay nhất)
+
+**Việc cần làm**: bỏ luật **thừa**. Luật yếu "sốt → cúm" bị luật mạnh hơn "sốt+ho → cúm" **che** → nên bỏ luật yếu.
+
+**❌ Cách CŨ — bỏ qua khi >10K luật**
+So từng cặp luật rất chậm (O(L²)) → khi sinh **>10.000 luật thì BỎ QUA** bước này → **giữ luôn luật rác** → nhiễu → **đoán sai nhiều hơn**.
+
+**✅ Cách MỚI — bitmap AND, chạy đầy đủ**
+Kiểm tra "luật A có nằm trong luật B" = **1 phép AND bitmap** → đủ nhanh để **chạy HẾT** dù nhiều luật → luật **sạch** → đoán đúng hơn.
+
+**Công thức**: `A ⊆ B  ⟺  ( bitmap[A] AND bitmap[B] ) == bitmap[A]`
+
+→ **Đây là cầu nối tốc độ ↔ chính xác**: nhờ ① đếm nhanh, mới có thời gian làm kỹ bước này. Accuracy tăng mạnh ở bộ nhiều luật: **Horse +9%, German +9%, Sonar +7%**.
+
+---
+
+## ⑤ TRỌNG SỐ BỎ PHIẾU — Lift thay χ²
+
+**Việc cần làm**: khi 5 luật bỏ phiếu, mỗi luật có "sức nặng" khác nhau.
+
+**❌ Cách CŨ — χ² chuẩn hóa**: sức nặng = chỉ số χ². Nhược: χ² bị **méo bởi độ phổ biến** (luật phổ biến thường χ² cao dù tương quan chỉ trung bình).
+
+**✅ Cách MỚI — Lift**: sức nặng = **lift** (luật đoán đúng gấp mấy lần ngẫu nhiên) → đo tương quan **trực tiếp**, không bị méo.
+```
+Lift = Confidence / tỉ lệ lớp = 0.80 / 0.40 = 2.0
+Bỏ phiếu: score(lớp c) = Σ lift(các luật khớp dự đoán c) → chọn c lớn nhất
+```
+→ Em đã test: lift > χ² (+0.21% accuracy).
+
+---
+
+## ⑥ CẮT TỈA COVERAGE — Stratified
+
+**Việc cần làm**: bỏ bớt luật **trùng độ phủ** (nhiều luật cùng phủ 1 nhóm mẫu).
+
+**❌ Cách CŨ — DCP cơ bản**: cắt chung → lớp **hiếm** (ít mẫu) dễ bị **mất sạch luật** → không đoán được lớp đó.
+
+**✅ Cách MỚI — Stratified**: **giữ riêng top 10 luật mạnh nhất MỖI lớp** trước khi cắt → lớp hiếm chắc chắn còn luật.
+→ Như chia học bổng đảm bảo mỗi lớp đều có suất.
+
+---
+
+## ⑦ NGƯỠNG χ² — chặt hơn (p=0.01)
+
+**Việc cần làm**: lọc luật có liên hệ **thật** hay chỉ **ngẫu nhiên** (dùng kiểm định χ²).
+
+**❌ Cách CŨ — p=0.05** (χ²≥3.84): dễ, lọt nhiều luật yếu/may rủi.
+
+**✅ Cách MỚI — p=0.01** (χ²≥6.63): **chặt hơn** → chỉ giữ luật liên hệ rõ ràng → bớt luật rác.
+
+**Công thức**: `χ² = Σ (Quan_sát − Kỳ_vọng)² / Kỳ_vọng`
+
+---
+
+## ⑧ POOL LUẬT — giàu hơn (minSup × 0.5)
+
+**minSup** = ngưỡng support tối thiểu (luật phải phổ biến tới mức này mới giữ).
+
+**❌ Cách CŨ — minSup theo paper**: ngưỡng cao → **ít luật ứng viên**.
+
+**✅ Cách MỚI — minSup × 0.5**: hạ ngưỡng còn một nửa → **nhiều luật ứng viên hơn** → khi chọn top-5 có nhiều luật chất để chọn.
+→ Như tuyển 5 người: 100 ứng viên chọn được người giỏi hơn so với chỉ 10 ứng viên.
+→ Làm được nhờ **bitmap đủ nhanh** để xử lý lượng luật lớn.
+
+---
+
+## ⑨ GIỮ NGUYÊN của bản gốc: SẮP XẾP LUẬT (CSA)
+
+Khi chọn top-5, sắp xếp theo **confidence → support → độ dài** (CSA gốc). Em đã **thử 7 cách sắp xếp khác** (lift, χ², WRA...) — **tất cả đều kém hơn** → giữ cách gốc.
+→ *Trung thực: không phải mọi thứ đều đổi; cái gì gốc đã tốt nhất thì giữ.*
+
+---
+
+# BẢNG TỔNG HỢP: CŨ vs MỚI
+
+| # | Khâu | CÁCH CŨ | CÁCH MỚI | Loại |
+|---|---|---|---|---|
+| 1 | Đếm support | quét list O(N·L) | **bitmap AND** (64 bit/lệnh) | ⚡ tốc độ |
+| 2 | Khai phá | tuần tự 1 lõi | **song song** (N≥200) | ⚡ tốc độ |
+| 3 | Lưu/tìm luật | List, quét hết | **CR-tree + bitmap** | ⚡ tốc độ |
+| 4 | Cắt tỉa G2S | **bỏ qua** khi >10K luật | **chạy đầy đủ** (bitmap) | ⚡+🎯 |
+| 5 | Bỏ phiếu | χ² chuẩn hóa | **Lift** | 🎯 chính xác |
+| 6 | Coverage | DCP cơ bản | **Stratified** | 🎯 chính xác |
+| 7 | Ngưỡng χ² | p=0.05 | **p=0.01** | 🎯 chính xác |
+| 8 | Pool luật | minSup paper | **minSup × 0.5** | 🎯 chính xác |
+| 9 | Sắp xếp luật | CSA | **CSA (giữ nguyên)** | đã tối ưu |
+
+---
+
+# KẾT QUẢ (chạy thật, 26 bộ UCI, 10-fold CV, topK=5)
+
+| Chỉ số | Cách CŨ (gốc) | Cách MỚI (cải tiến) | Bài báo CMAR |
+|---|---:|---:|---:|
+| Accuracy | 83–84% | **85.23%** | 85.22% |
+| Tốc độ | 1× | **~4× nhanh hơn** | — |
+| F1 / Recall | thấp hơn | cao hơn | — |
+
+Kiểm chứng thêm trên **Mushroom** (8124 mẫu, ngoài paper): **nhanh 7.14×**, accuracy 99.93% (giữ nguyên).
+
+---
+
+# CÂU CHỐT (nhớ cái này là đủ)
+
+> **Nhờ ĐẾM NHANH hơn bằng bitmap (①), bản cải tiến có thời gian LỌC LUẬT KỸ hơn — chạy đầy đủ G2S (④) mà bản gốc phải bỏ qua → vừa NHANH ~4× VỪA CHÍNH XÁC hơn (vượt cả bài báo). Cộng thêm bỏ phiếu lift (⑤), bảo vệ lớp ít (⑥), lọc χ² chặt (⑦), pool luật giàu (⑧).**
+
+Tóm gọn 2 nhóm:
+- **TỐC ĐỘ** ⚡: bitmap AND + song song + CR-tree.
+- **CHÍNH XÁC** 🎯: full G2S + lift + stratified + χ² chặt + pool giàu.
